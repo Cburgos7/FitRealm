@@ -1,0 +1,2182 @@
+# CLAUDE.md — FitRealm (Working Title)
+> ⚠️ Last updated: Infrastructure simplified to Vercel + Supabase only. AWS deferred to Phase 3 if needed.
+> Project brief for Claude Code. Read this file before doing anything else.
+
+---
+
+## What We're Building
+
+**FitRealm** is a mobile RPG where real-world **movement of any kind** directly powers in-game survival and progression. Walking, running, cycling, hiking — any physical movement counts. The player owns a village anywhere on Earth — chosen freely at signup, not tied to their real location. The game world is layered over Mapbox as a custom fantasy-styled map overlay.
+
+After any movement session (walk, run, cycle, hike, or indoor workout), the player banks those miles and then **chooses how to spend them**. **Miles are the universal currency of FitRealm.** Every resource in the game — Food, Medicine, Wood, Stone, map exploration, building construction — is ultimately purchased with miles. Movement is money. You decide how to invest it: feed your village today, or save up for a building that pays off next week? This creates meaningful strategic decisions after every workout.
+
+This is **not** a fitness app with game rewards bolted on. The movement **is** the core mechanic. No activity = village eventually decays. Consistent activity = thriving, growing kingdom.
+
+---
+
+## Tech Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Mobile Framework | React Native (bare workflow) | TypeScript throughout |
+| Maps | Mapbox SDK (`@rnmapbox/maps`) | Custom fantasy style over real-world geography; free tier 50k loads/month |
+| Location Tracking | `react-native-background-geolocation` | GPS for outdoor runs |
+| Health Integration | Apple HealthKit / Google Health Connect | Treadmill + indoor activity sync |
+| State Management | Zustand | |
+| Navigation | React Navigation v6 | |
+| Backend | Node.js + Express on **Vercel** (serverless functions) | Simple deploy, free tier, already in use |
+| Cron Jobs | Vercel Cron (via `vercel.json`) | Village decay every 6 hours |
+| Database | **Supabase** (PostgreSQL + PostGIS) | Auth, DB, real-time, storage |
+| Real-time | Supabase Realtime | Faction feed, live events |
+| Push Notifications | **Expo Notifications** | Simpler than SNS for React Native |
+| File Storage | **Supabase Storage** | GPS route GeoJSON + user assets — keeps everything in one place |
+| Offline Storage | SQLite (`react-native-sqlite-storage`) | Buffer runs without signal |
+| In-App Purchases | **RevenueCat** | Abstracts StoreKit (iOS) + Google Play Billing (Android), handles receipts + subscriptions |
+
+---
+
+## Cross-Platform Requirements (iOS + Android)
+
+FitRealm ships on both platforms simultaneously. React Native handles most of the abstraction, but these areas require platform-specific attention. Claude Code must test both platforms for every feature.
+
+### Platform-Specific Libraries
+
+| Feature | iOS | Android | Abstraction Layer |
+|---|---|---|---|
+| Health Data | Apple HealthKit | Google Health Connect | `react-native-health` (wraps both) |
+| Location (foreground) | Core Location | Fused Location Provider | `react-native-background-geolocation` (handles both) |
+| Location (background) | Core Location + "When In Use" | ACCESS_FINE_LOCATION + foreground service | Same library, different permissions |
+| In-App Purchases | StoreKit 2 | Google Play Billing | `react-native-iap` or **RevenueCat** (recommended — handles receipts, subscriptions, analytics) |
+| Push Notifications | APNs | FCM | Expo Notifications (abstracts both) |
+| Maps | Mapbox iOS SDK | Mapbox Android SDK | `@rnmapbox/maps` (handles both) |
+| Widgets | WidgetKit (SwiftUI) | App Widgets (Kotlin) | No abstraction — native code on each platform (Phase 2) |
+| Offline Storage | SQLite | SQLite | `react-native-sqlite-storage` (same API) |
+| Haptic Feedback | UIImpactFeedbackGenerator | Vibrator API | `react-native-haptic-feedback` |
+
+### Location Permissions (Critical — #1 App Store Rejection Risk)
+
+**Phase 0: Foreground only.** The movement tracker runs while the app is open. This avoids the hardest permission issues.
+
+**iOS permissions:**
+- `NSLocationWhenInUseUsageDescription`: "FitRealm tracks your movement to convert steps into in-game resources for your village."
+- Request "When In Use" permission during the first movement session, NOT during onboarding (Apple rejects apps that request permissions before the user understands why)
+- Do NOT request "Always" permission in Phase 0
+
+**Android permissions:**
+- `ACCESS_FINE_LOCATION` (precise GPS)
+- Android 12+: user may grant "approximate only" — detect this and show a prompt explaining why precise location is needed for distance tracking
+- Android 13+: `POST_NOTIFICATIONS` must be requested separately at runtime (not auto-granted)
+- Battery optimization: show a one-time prompt linking to device settings if Doze mode is detected during a movement session
+
+**Phase 2: Background location.**
+- iOS: upgrade to "Always" permission with a clear in-app explainer. Apple requires a visible justification in the app AND in App Store review notes.
+- Android: `ACCESS_BACKGROUND_LOCATION` — must be requested SEPARATELY from foreground location (Google Play policy). Show a dedicated explanation screen before the permission dialog.
+- Both platforms: use `react-native-background-geolocation` which handles foreground service (Android) and background modes (iOS) correctly.
+
+### In-App Purchase Strategy
+
+**Use RevenueCat** (free up to $2,500/mo revenue) instead of raw `react-native-iap`. RevenueCat:
+- Abstracts StoreKit (iOS) and Google Play Billing (Android) behind one API
+- Handles receipt validation server-side (prevents jailbreak/root purchase fraud)
+- Manages subscription lifecycle (renewals, cancellations, grace periods)
+- Provides revenue analytics dashboard
+- Handles the App Store's "Restore Purchases" requirement automatically
+
+**Revenue split awareness:**
+- Apple: 30% cut (15% if enrolled in Small Business Program — under $1M/year revenue)
+- Google: 15% on first $1M, then 30%
+- Price gems/packs to account for this. A $4.99 Supporter Pack nets ~$4.24 (Apple SBP) or ~$4.24 (Google)
+- Subscription prices must be set per-platform in App Store Connect and Google Play Console
+
+**Required IAP implementation details:**
+- "Restore Purchases" button in Settings (Apple REQUIRES this — rejection without it)
+- Subscription management link in Settings (both platforms require easy cancellation access)
+- Receipt validation via RevenueCat server (never trust client-side purchase verification)
+- Gem balance stored server-side in Supabase (not on-device) to prevent manipulation
+
+### Push Notification Permissions
+
+**iOS:**
+- Request notification permission after the player completes their first movement session (not during onboarding)
+- Support provisional notifications (iOS 12+) for quiet delivery initially
+- Notification categories for actionable notifications: "Rally Back" button on faction events, "Start Moving" on decay warnings
+
+**Android:**
+- Android 12 and below: notifications granted by default
+- Android 13+: `POST_NOTIFICATIONS` must be requested at runtime — do this after first movement session
+- Create notification channels: "Village Alerts" (high priority), "Faction Activity" (default), "Events & Quests" (default), "Reminders" (low priority)
+- Users can disable individual channels in system settings — respect this
+
+### Platform-Specific UI Requirements
+
+**Both platforms:**
+- Use `react-native-safe-area-context` for all screens (handles notch, Dynamic Island, Android cutouts)
+- Bottom tab navigation (React Navigation bottom tabs) — standard on both platforms
+- `react-native-haptic-feedback` for satisfying tactile responses: allocation confirmed, building built, achievement unlocked, rally sent
+
+**iOS-specific:**
+- Swipe-to-go-back enabled by default (React Navigation handles this)
+- Large title headers on main screens (iOS convention)
+- SF Symbols for system icons where appropriate
+- Dynamic Island live activity for active movement sessions (Phase 3)
+
+**Android-specific:**
+- Hardware back button handling on all screens (React Navigation handles this)
+- Material Design 3 ripple effects on buttons
+- Edge-to-edge display support (Android 15+)
+- Predictive back gesture support
+
+### Build & Deployment
+
+**Development:**
+- Test on both platforms for EVERY feature before merging
+- iOS: Xcode + iOS Simulator (requires Mac)
+- Android: Android Studio + emulator (any OS)
+- Physical device testing required for: GPS tracking, HealthKit/Health Connect, push notifications, haptics
+
+**CI/CD (Phase 1):**
+- Use **EAS Build** (Expo Application Services) for cloud builds — builds iOS without a Mac in CI
+- Or: GitHub Actions + Fastlane for more control
+- Separate build configs: development, staging, production
+
+**Signing & Certificates:**
+- iOS: Apple Developer Program ($99/year). Provisioning profiles, signing certificates, App Store Connect setup.
+- Android: Generate a keystore for signing. Store securely — losing it means you can't update the app. Upload signing key to Google Play App Signing (recommended).
+
+**Distribution:**
+- iOS: TestFlight for beta → App Store for production
+- Android: Internal Testing Track → Closed Testing → Production on Google Play
+- Both platforms can be submitted simultaneously
+
+### Android Device Fragmentation
+
+**GPS accuracy:**
+- Android GPS accuracy varies wildly across devices and manufacturers
+- The Kalman filter + 20m accuracy threshold handles most of this
+- Cheap devices may have GPS drift of 50m+ — consider a 30m threshold as a fallback config in `game_config`
+
+**Battery optimization (Android-specific problem):**
+- Samsung, Xiaomi, Huawei, OnePlus, and Oppo all have aggressive battery optimization that kills background processes
+- `react-native-background-geolocation` handles most cases, but some devices require manual whitelisting
+- On first movement session, detect the device manufacturer. If it's a known aggressive OEM, show a one-time guide: "To ensure accurate tracking, please disable battery optimization for FitRealm" with a deep link to the relevant settings page
+- Use the `dontkillmyapp.com` API/database for manufacturer-specific instructions
+- This is a KNOWN pain point for every fitness app on Android — it's not solvable in code alone, but good UX around it minimizes user frustration
+
+---
+
+## Infrastructure: Vercel + Supabase
+
+Keeping infrastructure simple while the app is early-stage. All three services have generous free tiers.
+
+| Service | Purpose | Notes |
+|---|---|---|
+| **Vercel** | Host Express API as serverless functions | Already in use; zero-config deploys from Git |
+| **Vercel Cron** | Village decay job every 6 hours | Defined in `vercel.json` — no Lambda needed |
+| **Supabase** | PostgreSQL + PostGIS + Auth + Realtime | One service replaces DB + auth + websockets |
+| **Supabase Storage** | Store GPS route GeoJSON files + user assets | Same Supabase project — no extra credentials needed |
+
+**Vercel cron setup** (in `vercel.json`):
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/village-decay",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/generate-random-quests",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/check-streaks",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-tile-content",
+      "schedule": "0 0 * * 1"
+    },
+    {
+      "path": "/api/cron/reset-rest-days",
+      "schedule": "0 0 * * 1"
+    },
+    {
+      "path": "/api/cron/evening-digest",
+      "schedule": "30 0 * * *"
+    }
+  ]
+}
+```
+- `village-decay`: every 6 hours, reduces resources (respects grace period + Rest Days)
+- `generate-random-quests`: daily at 8 AM UTC, generates 1–3 random quest events per active player
+- `check-streaks`: daily at 3 AM UTC, evaluates streak continuity, applies shields, breaks stale streaks
+- `refresh-tile-content`: every Monday midnight UTC, generates new resource caches, encounters, and rare spawns across explored tiles for all active players
+- `reset-rest-days`: every Monday midnight UTC, resets `rest_days_used_this_week` to 0
+- `evening-digest`: daily, triggers evening faction digest push notifications (staggered by user timezone)
+
+**Environment variables** (store in Vercel project settings, never in repo):
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_STORAGE_BUCKET` (e.g. `run-routes`)
+- `MAPBOX_ACCESS_TOKEN`
+
+**When to scale up:** The Supabase + Vercel stack can comfortably handle thousands of users. If you outgrow Supabase Storage limits (5GB free, 100GB Pro), consider migrating file storage to AWS S3 — but that's a good problem to have.
+
+---
+
+## Supabase Setup
+
+Supabase replaces a self-managed PostgreSQL + Auth + Socket server. It gives you:
+- **PostgreSQL + PostGIS** — all geospatial queries out of the box
+- **Supabase Auth** — Google + Apple Sign-In
+- **Supabase Realtime** — subscribe to DB changes for faction activity feed
+- **Supabase Storage** — file storage for GPS route GeoJSON and user assets
+
+Use the `supabase-js` client in React Native and the `@supabase/supabase-js` package on the backend.
+
+---
+
+## Onboarding Design (First 5 Minutes + First 7 Days)
+
+Onboarding is the single highest-impact feature for retention. If a player doesn't understand the core loop and feel emotionally invested within the first session, they won't come back. Design every step to be action-first — teach by doing, not explaining.
+
+### First Session (5 minutes)
+
+**Step 1 — Splash + Hook (30 seconds)**
+- Animated splash: a small village in a fantasy landscape, resources depleting
+- Single line of text: "Your village needs you. Every step you take keeps it alive."
+- Button: "Build My Village →"
+
+**Step 2 — Sign In (30 seconds)**
+- Google or Apple sign-in via Supabase Auth
+- No email/password option in Phase 1 (reduces friction)
+
+**Step 3 — Name & Place Your Village (60 seconds)**
+- "Name your village" text input (default suggestion generated: "Thornhaven", "Mistwood", etc.)
+- Full world Mapbox map: "Tap anywhere to place your village"
+- Helper text: "This is your kingdom's home — choose anywhere on Earth"
+- Optional: "Use my current location" button
+- Confirm placement → brief animation of village being built
+
+**Step 4 — The First Crisis (60 seconds)**
+- Immediately after village placement, a narrative event triggers:
+  - "⚠️ Your villagers are hungry! They need food to survive the night."
+  - Resource meters appear — Food is at 30/100 (visually urgent, yellow/orange)
+  - "Hunt for food by walking. Any distance counts."
+  - Big button: "Start Moving →" (launches the movement tracker)
+- The player walks even 0.1 miles (across the room, down the hallway — anything)
+- On stopping: "You hunted successfully! +50 Food 🎉"
+- Food meter fills to 80. Village shows happy villagers. Celebration animation.
+- This completes the FULL core loop in under 2 minutes: move → bank miles → auto-allocate → village improves
+
+**Step 5 — Tutorial Wrap (30 seconds)**
+- Quick overlay explaining: "Your village has 4 needs: Food, Medicine, Wood, Morale"
+- "Move every day to keep your village alive and growing"
+- "You have a 24-hour grace period — no decay until tomorrow"
+- Button: "Enter My Village →" — drops into the Home screen
+
+### First 7 Days — Onboarding Quest Chain
+
+A guided quest chain that teaches one mechanic per day. Each quest auto-generates the morning after the previous one is completed. Rewards are tuned to be generous so new players feel powerful early.
+
+| Day | Quest Name | Teaches | Task | Reward |
+|---|---|---|---|---|
+| 1 | "Feed Your People" | Core movement → resource loop | Walk/move any distance | +50 Food, +10 Gems |
+| 2 | "Stock the Supplies" | Allocate screen + choosing | Bank 0.5 mi, then allocate to Medicine or Wood | +30 to chosen resource, +10 Gems |
+| 3 | "Explore Your Land" | Map + fog of war | Allocate 1 mile to Scout | 4 hex tiles revealed, +10 Gems |
+| 4 | "Find Your Allies" | Factions | Join or create a faction | +20 Morale, +15 Gems, faction intro |
+| 5 | "Rally Your Friends" | Rally system | Give 2 Rallies to faction members | +10 Morale, +10 Gems |
+| 6 | "Rest & Recover" | Rest Day mechanic | Declare a Rest Day | +10 Morale, streak preserved, +10 Gems |
+| 7 | "The Road Ahead" | Streak + long-term hook | Complete any movement (streak now = 7 days) | Village garden blooms (first visual milestone), +25 Gems, "First Week" achievement badge |
+
+After Day 7: onboarding chain ends, regular random quest system takes over. A push notification congratulates them: "Your village survived its first week! You're a true realm keeper. 🏰"
+
+### Post-Onboarding Milestone Quests
+After the 7-day chain, special milestone quests trigger at key moments to introduce advanced mechanics:
+
+| Trigger | Quest | Teaches |
+|---|---|---|
+| Player has 5+ banked miles AND no buildings | "Lay the First Stone" | Building system — guided prompt to build their first building. Reward: +20 Stone bonus |
+| Player builds first building | "The Village Grows" | Building upgrades — explains tiers, shows what Lv 2 unlocks. Reward: +10 Gems |
+| Player reaches 20 total miles banked (lifetime) | "Beyond the Horizon" | Expedition system — explains how travel triggers expeditions. Reward: +15 Gems |
+| Player's faction completes first weekly quest | "Strength in Numbers" | Faction quest rewards + contributing miles. Reward: +20 Gems |
+| Player earns 100 total Gems | "The Gem Economy" | Gem Shop — explains what gems buy. Reward: 1 free Streak Shield |
+
+These quests appear as special gold-bordered quest cards on the home screen. They don't expire (unlike random quests) and disappear once completed.
+
+---
+
+## Monetization System
+
+FitRealm uses a layered monetization approach designed to be generous to free players while offering genuine value to supporters. The core game is fully playable for free — monetization is convenience, cosmetics, and supporting the project.
+
+### Gems (Virtual Currency)
+
+Gems are the in-game economy. They are earned generously through gameplay and can optionally be purchased.
+
+**Earning gems (free):**
+| Source | Gems Earned |
+|---|---|
+| Any movement session (≥ 0.25 mi) | +3 Gems |
+| Completing a random quest | +5–15 Gems (variable) |
+| Streak milestone (7 days) | +25 Gems |
+| Streak milestone (30 days) | +50 Gems |
+| Streak milestone (100 days) | +150 Gems |
+| Giving a Rally | +1 Gem |
+| Faction weekly quest completed | +20 Gems (all members) |
+| World Event reward earned | +30–100 Gems |
+| Onboarding quest chain (total) | +100 Gems |
+
+**Streak gem multiplier (active while streak is maintained):**
+| Streak Length | Gem Earning Bonus |
+|---|---|
+| 7+ days | +5% |
+| 30+ days | +10% |
+| 60+ days | +15% |
+| 100+ days | +20% (cap) |
+
+**Spending gems:**
+| Item | Gem Cost | Effect |
+|---|---|---|
+| Streak Shield | 30 Gems | Protects streak for 1 missed day (max 2 stored) |
+| Extra Rest Day | 40 Gems | Use a 2nd Rest Day in the same week |
+| Village Recovery | 50 Gems | Instantly recover from Ruined state |
+| Extra Quest Slot | 25 Gems | Get a 4th random quest for the day |
+| Village Rename | 15 Gems | Change your village name |
+| Outpost Rename | 10 Gems | Change an outpost name |
+
+**Gem packs (real money, IAP):**
+| Pack | Price | Gems | Bonus |
+|---|---|---|---|
+| Handful | $0.99 | 50 | — |
+| Pouch | $2.99 | 175 | +17% bonus |
+| Chest | $4.99 | 325 | +30% bonus |
+| Treasury | $9.99 | 750 | +50% bonus |
+
+### Supporter Pack (One-Time Purchase — $4.99)
+A single "I believe in this app" purchase. No recurring cost.
+
+**Includes:**
+- Permanent **"Founder"** badge on profile (visible to faction members)
+- Unique **Founder's Banner** village cosmetic (simple colored banner — no complex art needed)
+- +1 extra Rest Day per week (2 instead of 1, permanently)
+- +10% permanent gem earning bonus (stacks with streak multiplier)
+- Early access to new features (feature flag toggle)
+
+This is designed to be aspirational and socially visible. When faction members see someone's Founder badge, it creates a "what's that?" conversation and organic word-of-mouth.
+
+### Realm Pass (Subscription — Phase 2)
+~$3.99/month or $29.99/year.
+
+**Includes everything in Supporter Pack, plus:**
+- **Streak Insurance**: automatic streak protection every day (no gems needed)
+- **Advanced Stats**: detailed movement history, resource trend graphs, exploration heatmap
+- **5 Random Quests/day** instead of 3
+- **Faction Leader Tools**: faction analytics, custom faction quest creation
+- **World Event Boost**: 1.25x progress during World Events
+- **No Ads** (when ads are eventually added)
+- **Priority Comeback**: returning after inactivity triggers an enhanced "Return of the Wanderer" quest chain with better rewards
+
+### Ads (Phase 3 — Only With Real Users)
+- **Rewarded video ads only**: "Watch a short video to earn 5 Gems" — always optional, player-initiated
+- Appear as an option on the Gem spending screen: "Not enough gems? Watch a video for 5 free"
+- **Never interrupt gameplay** with forced ads
+- Supporter Pack holders and Realm Pass subscribers see no ad options at all
+- Max 5 rewarded ads per day to prevent abuse
+
+### Monetization Design Rules
+- The game is FULLY playable for free. Every feature is accessible without paying.
+- Paying speeds things up or adds convenience but NEVER gates content.
+- Never sell resources directly (no "buy 50 Food for $0.99") — this would undermine the movement loop.
+- Never sell miles or movement credit — this would destroy the core mechanic.
+- Cosmetics from World Events are earn-only, never purchasable.
+- The Supporter Pack exists so fans can say "I helped build this" — it should feel like patronage, not a paywall.
+
+---
+
+## Content Pipeline
+
+FitRealm requires narrative content for random quests, chronicle entries, achievement descriptions, faction events, and world events. Here's how to produce it efficiently without a dedicated writer.
+
+### Content Template System
+All narrative content is generated from **templates with variables**, not hand-written per instance. This scales infinitely.
+
+**Random Quest templates (need 30–50 for Phase 1):**
+```
+"A {enemy_type} was spotted near the {landmark_type}. {action_verb} them before {time_phrase}!"
+Variables: enemy_type=[wolf pack, bandit scouts, wild boar, rogue traders], landmark_type=[forest, river crossing, mountain pass, trading post], action_verb=[Hunt, Intercept, Chase off, Confront], time_phrase=[sundown, dawn, the next moon, nightfall]
+```
+
+**Chronicle entry templates (need 20–30 for Phase 1):**
+```
+"Day {day_count} — {event_description} in the {direction} reaches of {village_name}."
+```
+
+**Faction event templates (need 15–20 for Phase 1):**
+```
+"{username} {action_past_tense} in the {biome} — {reward_description}"
+Example: "ShadowWalker patrolled the eastern woods — +12 Food for the kingdom"
+```
+
+### Content Volume for Phase 1 Launch
+| Content Type | Minimum Count | Format |
+|---|---|---|
+| Random quest templates | 40 | Template strings with variables in a JSON file |
+| Chronicle entry templates | 25 | Template strings with variables |
+| Achievement descriptions | 25 (one per badge) | Static strings |
+| Faction event narrations | 20 | Template strings with variables |
+| World event descriptions | 5 (one per event type) | Static strings |
+| Onboarding quest text | 7 (one per day) | Static strings |
+| Milestone quest text | 5 | Static strings |
+| Building descriptions | 6 buildings × 3 levels = 18 | Static strings |
+
+### AI-Assisted Content Generation
+For Phase 1, use Claude API to batch-generate template content before launch:
+- Write 5 example templates per content type as reference
+- Generate 50+ variations via Claude API with the prompt: "Generate random quest templates for a medieval fantasy village survival game. Match the tone of these examples: [examples]. Output as JSON array."
+- Human-review the output, discard any that feel off, ship the rest
+- Store all templates in a `content_templates` table in Supabase or as a JSON file in the repo
+
+### Content Expansion (Phase 2+)
+- Seasonal template packs (winter-themed quests, harvest-themed chronicles)
+- Community-submitted quest ideas (moderated)
+- Biome-specific templates based on player's village location (coastal village gets fishing quests, mountain village gets mining quests)
+
+---
+
+## Core Game Systems
+
+### 1. Village Placement & Relocation
+
+#### Initial Placement (Onboarding)
+- During onboarding, the player opens a **full world Mapbox map** and taps anywhere on Earth to place their village.
+- This coordinate becomes `village_origin` — the anchor for their entire game world.
+- Players can optionally use their real current location, but this is never required or encouraged.
+- The game never asks for, stores, or infers the player's real-world home address. Village origin is purely a game coordinate.
+- **Privacy by design**: Since every player freely chooses their village location, seeing someone's village on a map tells you NOTHING about where they actually live. A village in Paris could belong to someone in Texas. This is an intentional, foundational privacy feature — not a workaround.
+
+#### Village Relocation (Move Camp)
+Moving your village is a strategic decision with real cost. It's not casual — it should feel like a caravan packing up and migrating across the world.
+
+**Relocation cost scales with distance:**
+| Move Distance | Mile Cost | Resource Cost | Narrative |
+|---|---|---|---|
+| Under 10 mi (local move) | 5 miles | 10 Wood | "The village relocated to nearby fertile ground." |
+| 10–100 mi (regional move) | 15 miles | 20 Wood + 10 Stone | "A short migration to new territory." |
+| 100–500 mi (cross-region) | 30 miles | 40 Wood + 20 Stone + 20 Food | "The great caravan traveled for days across the land." |
+| 500–2,000 mi (cross-country) | 50 miles | 60 Wood + 30 Stone + 30 Food | "An epic migration across vast distances." |
+| 2,000+ mi (intercontinental) | 75 miles | 80 Wood + 40 Stone + 40 Food + 20 Medicine | "A legendary journey across oceans and continents." |
+
+**What happens when you relocate:**
+- New village origin is set to the tapped location
+- All buildings are preserved (they "travel with you" — no rebuilding)
+- Fog of war resets around the new location (you have to re-explore the new area)
+- Previously explored tiles at the old location remain explored (you can zoom out and see your full exploration history)
+- A Chronicle entry is auto-generated: "The village of Thornhaven undertook a great migration from the forests of England to the mountains of Colorado."
+- A faction event is posted: "Thornhaven has relocated! [Username] moved their village to a new region."
+- Any active outposts at the old location remain (they become distant waypoints)
+
+**Why players would relocate:**
+- **Be neighbors with friends**: move your village near a faction member so you can see each other on the map and share landmarks
+- **Chase World Events**: monthly events may be tied to regions or biomes. Moving to the right area gives strategic advantages
+- **Better landmarks**: some real-world areas have denser Mapbox POIs (cities vs. rural). Relocating to a landmark-rich area means more in-game content to discover
+- **Fresh exploration**: if you've fully explored your current area (all fog of war revealed), relocating gives you a whole new world to uncover
+- **Roleplay / storytelling**: your Chronicle tracks every migration, building a narrative of your village's journey across the world
+- **Faction strategy**: factions may want to cluster their villages in one region for territory dominance during competitive events
+
+**No artificial cooldown.** The mile and resource costs ARE the gating mechanism — you don't need a timer on top. If someone has 75 miles banked and wants to move across the world twice in one week, they earned it. The expense naturally prevents frivolous moves without punishing dedicated players.
+
+**Faction Migration (Group Discount):**
+When faction members relocate to the same general area (within 25 miles of each other), they receive escalating discounts. This rewards coordinated movement and makes faction-wide migrations feel like a caravan traveling together.
+
+| Faction Members Who Already Moved to This Area | Discount for Next Mover |
+|---|---|
+| 1 member already there | 10% off miles + resources |
+| 2–4 members already there | 20% off |
+| 5–9 members already there | 30% off |
+| 10+ members already there | 40% off (cap) |
+
+How it works:
+- When a player opens the relocation screen, the app checks if any faction members have villages within 25 miles of the target location
+- If yes, the discount is auto-applied and shown: "3 faction members are nearby — Caravan Discount: 20% off!"
+- The discount applies to BOTH mile cost and resource cost
+- A faction event is posted: "Thornhaven joined the caravan! 4 faction members now in the Alpine region."
+- This creates a natural pull: once 2-3 faction members move somewhere, the rest are incentivized to follow because it gets cheaper
+
+**Strategic implications:**
+- Factions can coordinate migrations toward World Events at reduced cost
+- A faction leader can announce "we're moving to the Pacific Coast this month" and early movers pave the way for cheaper moves for everyone else
+- Being a faction "pioneer" (first to move to a new region) has social value even though you pay full price — you're the one who made it cheaper for everyone
+- Chronicle entry for faction migrations: "The [Faction Name] caravan arrived in [Region] — [X] villages now stand together."
+
+**Scouting before moving:** Players can browse the full world map at any time to scout potential relocation spots. Unexplored areas show fog of war but the base Mapbox terrain is visible (you can see if a location has mountains, rivers, coastline, etc.). A "Preview" mode shows how many POI landmarks are nearby before committing to the move.
+
+### 2. Character & Avatar System
+
+Every player has a personal character — their representative in the game world. The avatar appears in the village scene, on the world map, in the faction feed, and on their profile.
+
+#### Art Style
+Clean illustrated, fantasy-themed. Think Clash Royale meets Duolingo — expressive characters that read well at small sizes on mobile screens. Slightly medieval aesthetic to match the village theme.
+
+#### Technical Implementation
+Avatars are built from **composable SVG layers** rendered on a base template. This is production-efficient and allows infinite combinations without creating individual assets for every permutation.
+
+#### Phase 1 Customization (Start Simple)
+During onboarding (after naming village, before placing it), the player builds their character:
+
+| Layer | Options (Phase 1) |
+|---|---|
+| Skin tone | 6 tones |
+| Hair style | 8 styles (4 short, 4 long) |
+| Hair color | 8 colors |
+| Face shape | 4 shapes |
+| Eyes | 6 styles |
+| Outfit | 4 starter outfits (villager, scout, farmer, healer) |
+
+All options are free. No paid customization in Phase 1.
+
+#### Phase 2+ Expansion
+- More hairstyles, facial hair, accessories (hats, cloaks, armor)
+- **Movement-earned outfits**: unlock new gear at milestone achievements (100-mile cloak, 365-day streak crown)
+- **Building-specific outfits**: building a Watchtower to Lv 3 unlocks a Guard Captain outfit
+- **World Event exclusive cosmetics**: limited-time character items earned during events
+- Realm Pass subscribers get access to a "Premium Wardrobe" with additional cosmetic options
+
+#### Where the Avatar Appears
+- **Village scene**: standing in the village square, animated idle pose
+- **World map**: your map marker IS your avatar (small circular portrait)
+- **Faction feed**: avatar portrait next to each RPG-narrated event
+- **Faction member list**: avatar portraits with username and role
+- **Profile**: large avatar display with achievement badges
+- **Friend Challenges**: side-by-side avatar comparison during 1v1 duels
+- **Leaderboard**: avatar portraits next to rankings
+
+#### Avatar Data
+Stored as a JSON object of selected layer IDs — lightweight, no image storage needed. The client renders the composite on-device from the layer assets bundled with the app.
+
+### 3. Mile Banking & Allocation System
+This is the core loop that separates FitRealm from other fitness games. **Movement is currency. Miles buy everything.**
+
+#### Resource Economy Hierarchy
+All resources in FitRealm flow from one source: physical movement converted into miles. The economy has three tiers:
+
+| Tier | Source | % of Resources | Role |
+|---|---|---|---|
+| **Primary** | Mile allocations (player choice) | ~80% | The core loop. You move, you choose where those miles go. This IS the game. |
+| **Secondary** | Building passive generation | ~15% | Safety net. Buys time on busy days. Never enough to sustain a village alone. |
+| **Tertiary** | Streak bonuses, Rallies, quest rewards, events | ~5% | Small perks that reward engagement. Flavor, not sustenance. |
+
+This hierarchy is non-negotiable. If any tuning change makes Secondary or Tertiary sources large enough to sustain a village without movement, that is a bug — rebalance immediately.
+
+**Step 1 — Earn miles**: Any physical movement (outdoor GPS, treadmill, HealthKit sync). Miles are added to a **Mile Bank**.
+
+**Step 2 — Choose your investment**: After logging activity, or any time from the home screen, the player opens the **Allocate screen** and decides how to spend banked miles. This is where strategy lives — do you feed your village now or invest in a building that reduces future decay?
+
+| Allocation | Miles Cost | Effect | Narrative Flavor |
+|---|---|---|---|
+| Hunt for Food | 0.5 miles | +20 Food | "Your hunters ventured into the wild and returned with game." |
+| Gather Medicine | 0.5 miles | +20 Medicine | "Your healers foraged the forest for herbs and remedies." |
+| Chop Wood | 0.5 miles | +20 Wood | "Your workers felled timber from the nearby woods." |
+| Quarry Stone | 1.0 mile | +10 Stone | "Your miners broke stone from the eastern cliffs." |
+| Scout Region | 1.0 mile | Reveal fog-of-war tiles on map | "Your scouts mapped uncharted territory beyond the borders." |
+| Explore New Land | 1.0 mile | Unlock a new territory tile | "Explorers discovered new land ripe for expansion." |
+| Defend Village | 2.0 miles | Prevent next decay tick (one-time shield) | "The militia fortified the walls — the village is safe for now." |
+| Contribute to Faction | Any amount | Donate miles to faction weekly quest pool | "You sent supplies to your allies across the realm." |
+| Establish Outpost | 5.0 miles | Place an outpost at any explored location | "A new outpost was erected on the frontier." |
+| Move Camp | 5–75 miles (scales with distance) | Relocate village to a new coordinate (see Village Relocation section for full cost table) | "The village packed up and began a great migration." |
+
+Every allocation is a conscious decision: *"I walked 2 miles today. My Food is low but I'm saving for a Watchtower that needs 20 Wood. Do I hunt or chop?"* This decision-making IS the game. Without it, the app is just a step counter.
+
+- Unspent miles sit in the bank indefinitely — no expiry in Phase 1.
+- This gives players flexibility: treadmill runners accumulate miles and spend them strategically, same as outdoor runners.
+
+#### Miles Economy at a Glance
+Miles flow into and out of the player's bank like a real economy:
+
+**Miles In:**
+- Outdoor movement (GPS tracked)
+- Indoor movement (manual entry or HealthKit/Health Connect sync)
+- Movement type multipliers (running 1.25x, hiking 1.5x, walking 1.0x)
+
+**Miles Out (player chooses):**
+- Resource gathering: Food, Medicine, Wood, Stone (0.5–1.0 mi each)
+- Map exploration: Scout, Explore (1.0 mi each)
+- Defense: Defend Village (2.0 mi)
+- Building construction: 3–20 miles per building depending on type and tier
+- Building upgrades: increasing mile costs per tier
+- Village relocation: Move Camp (5–75 mi, scales with distance)
+- Outpost placement: Establish Outpost (5.0 mi)
+- Faction support: Contribute to Faction (any amount)
+
+The player is always asking: *"What does my village need most right now, and can I afford it?"* — this is what makes FitRealm a game, not a tracker.
+
+### 4. Village Survival Loop
+Each village has 4 resource meters (0–100):
+- **Food** — replenished by Hunt allocations (any movement counts — a walk to the store feeds your village)
+- **Medicine** — replenished by Gather allocations
+- **Wood** — replenished by Chop allocations
+- **Morale** — replenished by any allocation + faction activity + movement streaks
+- **Stone** — earned via Quarry allocation, Lumber Mill Lv 2+, and some quests. Used exclusively for building construction/upgrades. Does not decay.
+
+**Decay rules:**
+- **No decay for the first 24 hours** after a player creates their village (grace period)
+- After 24 hours: base decay of -8 points per 12 hours per resource (server-side cron via Vercel Cron)
+  - Watchtower reduces this: Lv 1 = -10%, Lv 2 = -15%, Lv 3 = -20%
+  - Farm/Herbalist/Lumber Mill passively add resources each tick, offsetting decay
+- Resource hits 0: village shows visible damage in the UI
+- All resources at 0 for 48 hours: village enters **Ruined** state
+
+  **What "Ruined" looks and feels like:**
+  The village scene shifts to a somber but NOT depressing visual — buildings are weathered, gardens are overgrown (not dead), villagers are sitting around a dim campfire. The tone is "sleeping kingdom waiting for its leader," not "punishment." Background music shifts to a quiet, hopeful melody.
+
+  A banner across the screen reads: "Your village awaits your return."
+
+  **Recovery options:**
+  - Spend 5 banked miles → instant full recovery (all resources set to 50/100)
+  - Complete the "Return of the Wanderer" comeback quest chain (3 quests over 3 days) → full recovery + bonus rewards
+  - Realm Pass holders recover with resources at 60/100 instead of 50/100
+
+  **What is NOT lost during Ruined state:**
+  - Buildings remain at their current levels (you never lose construction progress)
+  - Streak resets, but streak visual milestones on buildings are preserved
+  - Achievement badges are permanent
+  - Chronicle entries are permanent
+  - Faction membership is maintained
+  - All banked miles remain
+  - Gems remain
+
+  **Design intent:** Ruined state should feel like a dramatic story beat ("the kingdom fell into slumber"), not a punishment. The recovery should feel heroic ("the wanderer returned and rebuilt"). Players who hit Ruined and come back should feel MORE invested, not less.
+- Completing any allocation resets a "last active" timestamp that slows decay slightly for active players
+
+### 5. Activity Logging (Outdoor + Treadmill)
+**Outdoor GPS runs:**
+- In-app movement tracker with live Mapbox map, distance, pace, time
+- Route stored as GeoJSON in Supabase Storage
+- Kalman filter on GPS points to reduce noise
+- Minimum GPS accuracy threshold: reject points with >20m accuracy
+
+**Treadmill / Indoor runs (manual entry):**
+- Log screen: enter distance + duration manually
+- Optional: sync from Apple HealthKit (iOS) or Google Health Connect (Android)
+  - If a workout is synced from Health, the app detects it and prompts "We found a 2.3-mile treadmill run — add to your mile bank?"
+- Manual entries are flagged as `source: 'manual'` in the DB for potential anti-cheat review later
+
+**Anti-cheat note (Phase 2):** For Phase 1, trust all inputs. In Phase 2, add rate limiting on manual entries (max X miles/day from manual) and anomaly detection on GPS routes.
+
+### 6. Real-World Map Layer (Mapbox)
+- Mapbox is the base layer with a **custom fantasy art style** applied (muted terrain colors, hidden road clutter, illustrated biome textures — forests, mountains, rivers — so it reads as a fantasy kingdom over real geography)
+- Players feel grounded in their real city/country but the map looks like a medieval RPG world
+- Village origin is the center of the player's game world
+- **Fog of war**: ~1-mile hex tiles surrounding the village origin start hidden; unlocked by Scout allocations
+- **Exploration reveal animation**: when Scout miles are allocated, fog-of-war hex tiles dissolve with a golden shimmer particle effect. The camera pans slightly outward from the village toward the newly revealed area. A toast notification appears: "Your scouts mapped the Western Marshlands!" If a landmark is revealed in the new tiles, it pops in with a bounce animation and a discovery notification: "A Trading Post was discovered!" This moment should feel like scratching a scratch-off ticket — satisfying and rewarding.
+- **Landmark discovery**: each revealed tile is checked for Mapbox POIs. If a POI exists, it becomes a named in-game landmark with a unique icon. Discovering landmarks earns +5 Gems and a Chronicle entry.
+- Mapbox POIs near the village origin become in-game landmarks:
+  - `park` / `nature_reserve` → Forest
+  - `hospital` / `pharmacy` → Healer's Hut
+  - `marketplace` / `shop` → Trading Post
+  - `river` / `lake` → River Crossing
+  - `mountain` / `peak` → Mountain Pass
+- Only user/village/faction markers update in real-time (via Supabase Realtime) — the base map is static tiles, not a live feed
+
+#### Living World System (Tile Content Refresh)
+Exploration should never feel "finished." The map is a living world where the geography is permanent but what's happening in it changes regularly.
+
+**Two layers of map content:**
+
+**Permanent Layer (never resets):**
+- Fog of war: once a hex tile is revealed, it stays revealed forever
+- Landmark POIs: Trading Posts, Forests, Healer's Huts, etc. — these are tied to real Mapbox POIs and remain fixed
+- Your exploration history is permanent and visible on the map (you can zoom out and see every tile you've ever uncovered, across all relocations)
+
+**Dynamic Layer (refreshes weekly, every Monday at midnight UTC):**
+- **Resource caches**: random spawns in explored tiles — small icons showing gatherable resources. Tapping one triggers a mini-quest: "A berry bush was found in the eastern woods — gather it? (0.25 mi → +8 Food)"
+- **Encounter spawns**: temporary threats or NPCs that appear in explored tiles. "A bandit camp appeared near the river crossing" — triggers a random quest with a time limit
+- **Seasonal flora/fauna**: visual variety in explored tiles changes with real-world seasons (spring = flowers, winter = snow, fall = orange leaves). Purely cosmetic but keeps the map feeling alive
+- **Rare spawns**: low-probability special discoveries in explored tiles (ancient ruins, hidden caves, mysterious traders). These give bonus Gems or exclusive cosmetic rewards. Rarity keeps players checking their map regularly.
+
+**How the refresh works (server-side):**
+- Vercel Cron job runs every Monday at midnight UTC: `/api/cron/refresh-tile-content`
+- For each active player, the system generates new dynamic content across their explored tiles
+- Content density: ~1 resource cache per 3 explored tiles, ~1 encounter per 5 tiles, ~1 rare spawn per 20 tiles
+- Players are notified: "The world has shifted — new discoveries await in your explored lands! 🗺️"
+- Dynamic content expires after 7 days (replaced by next week's refresh)
+- Unexplored tiles have no dynamic content — you must Scout first to unlock content spawns
+
+**Why this works:**
+- Players who've explored their entire area still have weekly reasons to check the map and do mini-quests
+- The map feels alive and unpredictable without erasing the player's exploration progress
+- "What spawned this week?" becomes a Monday morning ritual — a natural engagement hook
+- Rare spawns create variable reward excitement (the slot machine effect, but earned through exploration)
+- Faction members can share tips: "There's a rare trader in the northern tiles this week!" — driving social engagement
+
+### 7. Expedition System (Road Trips & Travel)
+Travel in the real world triggers rare, high-reward **Expedition events** in the game. This rewards players who travel without letting it replace daily fitness.
+
+**How it works:**
+- The app passively detects vehicle-speed movement (>25 mph sustained for >10 minutes) via GPS during an active session or via HealthKit/Google Health travel detection
+- On arrival, the app prompts: "You traveled X miles — an Expedition occurred!"
+- The player names the expedition and it appears on their map as a journey arc
+
+**What expeditions reward (exploration only — never Food/Medicine/Wood):**
+| Travel Distance | Expedition Reward |
+|---|---|
+| 25–99 miles | Reveal a large fog-of-war region on the map |
+| 100–299 miles | Discover a rare landmark (dungeon, ancient ruins, hidden market) |
+| 300–999 miles | Unlock a distant region + place a temporary **Outpost** at the destination |
+| 1,000+ miles | Discover a **Legendary Site** — generates bonus quests for 7 days |
+
+**Outposts:**
+- A secondary anchor point on the map (e.g. you drove to another city)
+- Generates 1 bonus quest per day for 3 days after the trip
+- Can be upgraded to a permanent **Waypoint** by completing those quests
+
+**Critical design rule — expeditions never replace fitness:**
+- Expedition rewards are exploration/map rewards only
+- Food, Medicine, Wood, and Morale can ONLY be replenished by physical activity (running, walking)
+- This keeps the fitness loop as the non-negotiable heartbeat of the game
+- A player who only road trips will have a richly explored map but a decaying village
+
+**Faction expeditions:**
+- If a faction member travels to another faction member's city, it triggers a "Faction Envoy" event
+- Rewards both players with bonus morale and a shared faction quest
+
+### 8. Factions & Multiplayer
+- Players can form or join a **Faction** (up to 20 members, Phase 1)
+- Factions are not geographically restricted — friends anywhere can faction together
+- Faction members can see each other on a shared map view (opt-in, shows village origins + avatar portraits)
+- **Faction quests**: weekly collective mile goals (e.g. "Log 75 miles total this week → unlock Faction Stronghold")
+- Members contribute miles from their bank to faction quests
+- Activity feed powered by **Supabase Realtime**: events insert into `faction_events` table, all members subscribed
+
+#### Faction Governance
+Factions need clear rules to prevent drama and handle edge cases:
+
+**Roles:**
+| Role | Permissions |
+|---|---|
+| **Leader** | Kick members, promote to Co-Leader, set faction name/description, create custom faction quests (Realm Pass), disband faction |
+| **Co-Leader** | Kick members (except Leader/Co-Leaders), accept join requests |
+| **Member** | Participate in quests, Rally, contribute miles, view feed |
+
+**Leader inactivity:**
+- If the Leader has not logged any activity for 14 consecutive days, a notification is sent: "Your faction leader has been inactive. Leadership may transfer soon."
+- After 21 days of Leader inactivity: leadership automatically transfers to the most active Co-Leader (by total miles in the last 30 days). If no Co-Leaders exist, it transfers to the most active Member.
+- A faction event is posted: "Leadership of [Faction Name] has passed to [New Leader]."
+
+**Joining & leaving:**
+- Factions can be set to **Open** (anyone joins instantly) or **Request** (Leader/Co-Leader must approve)
+- A player can leave a faction at any time. Contributed miles to faction quests are NOT refunded.
+- A player can only be in 1 faction at a time
+- After leaving or being kicked, the player must wait 24 hours before joining another faction (prevents hopping for rewards)
+
+**Kicking:**
+- Leader/Co-Leader can kick a member. Kicked player receives a notification but no reason is required.
+- Kicked players keep all personal progress (village, buildings, streaks, achievements, gems)
+- A kicked player cannot rejoin the same faction for 7 days
+
+**Disbanding:**
+- Only the Leader can disband a faction. Requires confirmation ("This will remove all members. Are you sure?")
+- All members keep personal progress. Faction quest progress is lost.
+- A 48-hour warning is sent to all members before disbanding takes effect
+
+### 9. Building System
+
+Buildings make your village feel personal and give long-term players a strategic investment layer. Every building is earned through movement — there is no way to buy buildings with real money or gems.
+
+#### Design Philosophy
+- Buildings create **long-term goals** that keep players engaged beyond daily survival
+- Each building either reduces decay pressure, boosts earnings, or unlocks a mechanic
+- Building costs use a **mix of resources + miles** — every building requires miles to construct, reinforcing that movement is the foundation of everything. The trade-off: spend miles on immediate survival (food, medicine) or invest in infrastructure that reduces future pressure? This is the core strategic tension of FitRealm
+- Buildings visually appear in the village scene at **pre-set slots** (6 zones in the village view), not free-placement grid
+- Each building has **3 upgrade tiers** with increasing costs and compounding benefits
+- Visual progression per tier: Level 1 = basic wooden structure, Level 2 = stone walls + details, Level 3 = impressive fortified version
+
+#### Village Layout (Pre-Set Slots)
+The village scene has 6 designated building zones arranged around a central village square:
+
+```
+         [Watchtower]
+              |
+[Lumber Mill] ---- [Farm]
+              |
+        [Village Square]
+         (always present)
+              |
+  [Herbalist] ---- [Tavern]
+              |
+         [Storehouse]
+```
+
+- The Village Square is always visible (it's the "heart" — shows villagers, streak visuals, celebrations)
+- Each slot starts empty with a "Build" prompt
+- Players choose which building to construct first — this is a strategic decision
+- All 6 slots are available from the start but building costs increase, so players naturally build 1-2 first and expand over time
+
+#### Building Definitions
+
+**🌾 Farm**
+Purpose: Passive Food generation — reduces the pressure to constantly allocate miles to hunting.
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 3 miles + 20 Wood | +1 Food per decay tick (every 6 hours) | Small garden plot with crops |
+| Lv 2 | 6 miles + 40 Wood + 15 Stone | +2 Food per decay tick | Fenced farm with rows of crops |
+| Lv 3 | 12 miles + 80 Wood + 30 Stone | +3 Food per decay tick + occasionally generates a bonus random quest related to harvesting | Large farm with barn, animated workers |
+
+**💊 Herbalist Hut**
+Purpose: Passive Medicine generation.
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 3 miles + 20 Wood | +1 Medicine per decay tick | Small hut with herb garden |
+| Lv 2 | 6 miles + 40 Wood + 15 Stone | +2 Medicine per decay tick | Expanded hut with greenhouse |
+| Lv 3 | 12 miles + 80 Wood + 30 Stone | +3 Medicine per decay tick + Rest Days restore +3 to all resources | Stone apothecary with glowing herbs |
+
+**🪓 Lumber Mill**
+Purpose: Passive Wood generation + produces Stone (the new building material).
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 5 miles + 30 Food | +1 Wood per decay tick | Log pile with basic saw |
+| Lv 2 | 8 miles + 50 Food + 15 Stone | +2 Wood per decay tick + generates 2 Stone per decay tick | Water-powered sawmill |
+| Lv 3 | 15 miles + 80 Food + 40 Stone | +3 Wood per decay tick + generates 3 Stone per decay tick + 5% mile multiplier on all movement | Full lumber mill with animated wheel |
+
+**🏰 Watchtower**
+Purpose: Defensive — slows resource decay across the board.
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 5 miles + 20 Wood + 10 Stone | Decay rate reduced by 10% for all resources | Short wooden lookout tower |
+| Lv 2 | 10 miles + 40 Wood + 30 Stone | Decay rate reduced by 15% + random quest events give +2 bonus to rewards | Tall stone watchtower with flag |
+| Lv 3 | 20 miles + 80 Wood + 60 Stone | Decay rate reduced by 20% + doubles the faction-wide random quest frequency + unlocks "Early Warning" (push notification 2 hours before any resource hits 0) | Fortified tower with beacon fire |
+
+**🍺 Tavern**
+Purpose: Morale hub + social feature booster.
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 4 miles + 25 Wood | +2 Morale per decay tick + Rallies received give +3 Morale instead of +2 | Small wooden tavern |
+| Lv 2 | 8 miles + 50 Wood + 20 Stone | +3 Morale per decay tick + unlock "Tavern Tales" (see fun stats: faction's total miles this week, most active member, biggest single session) | Two-story tavern with sign |
+| Lv 3 | 15 miles + 80 Wood + 50 Stone | +4 Morale per decay tick + Rallies received give +5 Morale + Friend Challenge winners get double gem rewards | Grand tavern with outdoor seating, music notes animated |
+
+**📦 Storehouse**
+Purpose: Increases resource caps and mile bank capacity — lets players stockpile for big investments.
+
+| Level | Build Cost | Effect | Visual |
+|---|---|---|---|
+| Lv 1 | 4 miles + 25 Wood | Resource caps increase from 100 → 125 + Mile bank cap: unlimited (no change, but storehouse tracks total banked) | Small shed with crates |
+| Lv 2 | 8 miles + 50 Wood + 20 Stone | Resource caps increase to 150 + allocation costs reduced by 10% (0.5 mi hunt → 0.45 mi) | Stone warehouse with shelves |
+| Lv 3 | 15 miles + 80 Wood + 50 Stone | Resource caps increase to 200 + allocation costs reduced by 20% + "Surplus" mechanic: when any resource is above 150, excess slowly converts to Gems (1 Gem per 10 surplus per day) | Grand storehouse with gold accents, overflowing goods |
+
+#### Stone: The Building Material
+
+Stone is a new resource used exclusively for building construction and upgrades (Levels 2+). It cannot be "allocated" like Food/Medicine/Wood — it must be produced.
+
+**How to earn Stone:**
+- **Lumber Mill Level 2+**: Passively generates Stone every decay tick
+- **Quarry allocation**: New allocation option — spend 1.0 mile to gain +10 Stone
+- **Expedition rewards**: Some expeditions grant Stone as a bonus
+- **Random quest rewards**: Some quests award Stone alongside other resources
+
+Stone is stored separately from the 4 main resources and has no cap. It does not decay.
+
+#### New Allocation Option
+
+Add to the Allocate Miles screen:
+
+| Allocation | Miles Cost | Effect |
+|---|---|---|
+| Quarry Stone | 1.0 mile | +10 Stone |
+
+#### Building Construction Flow
+
+1. Player taps an empty building slot in the village view
+2. A panel shows the 6 available buildings with costs and effects
+3. Player selects a building → confirmation screen shows cost breakdown
+4. If player has enough resources + miles → "Build" button is active
+5. On confirm: resources deducted, miles deducted, building appears in the village with a construction animation
+6. Building is immediately functional (no build timers — this is NOT CoC. You earned it through movement, it's yours now.)
+7. Chronicle entry auto-generated: "A Farm was erected on the eastern fields of Thornhaven."
+
+#### Building Upgrade Flow
+
+1. Player taps an existing building
+2. Panel shows current level, current effects, and next level preview
+3. Cost for next level displayed
+4. If player has enough resources + miles → "Upgrade" button
+5. On confirm: upgrade animation, building visuals change, effects immediately active
+6. Chronicle entry: "The Farm was expanded — stone walls now protect the harvest."
+
+#### Critical Balance Rule: Buildings NEVER Replace Movement
+
+Buildings are a safety net, not an autopilot. At maximum level (all 6 buildings at Lv 3 + Watchtower), the math works out to:
+
+- Base decay: -8 per resource per tick
+- Watchtower Lv 3: reduces decay by 20% → effective decay = -6.4 per tick
+- Farm Lv 3: +3 Food per tick → net Food loss = -3.4 per tick
+- Herbalist Lv 3: +3 Medicine per tick → net Medicine loss = -3.4 per tick
+- Lumber Mill Lv 3: +3 Wood per tick → net Wood loss = -3.4 per tick
+- Tavern Lv 3: +4 Morale per tick → net Morale loss = -2.4 per tick
+
+**Even a fully maxed village still loses resources every tick.** Buildings slow the bleed from -8/tick to roughly -3/tick, giving players more forgiveness for busy days — but a player who stops moving entirely will still watch their village decay and eventually enter Ruined state. This is non-negotiable.
+
+The design intent: buildings buy you TIME, not freedom. A player with no buildings misses one day and is in trouble. A player with maxed buildings can miss 2-3 days before things get critical. But both players still need to move to thrive.
+
+If future balancing makes buildings too strong, always nerf building output — never increase decay rates. The player should never feel punished; they should feel like buildings help but aren't enough alone.
+
+#### Strategic Depth
+
+The building costs are designed so that:
+- **First building** (any Lv 1): achievable in the first 1-2 weeks of play
+- **Second building**: another week of consistent movement
+- **First Lv 2 upgrade**: requires Lumber Mill Lv 2 for Stone production, so players must plan
+- **All 6 at Lv 1**: roughly 1 month of consistent daily movement
+- **All 6 at Lv 3**: a long-term goal (2-3 months) — this is the "endgame" for dedicated players
+
+The Lumber Mill is the strategic keystone: it produces both Wood AND Stone, so players who build it early unlock faster access to everything else. But it costs Food instead of Wood, creating a trade-off: spend Food now to invest in infrastructure, or keep Food high for survival safety.
+
+---
+
+## Engagement & Retention Systems
+
+These systems are informed by research into what drives long-term engagement in the most successful gamified apps (Duolingo, Strava, Pokémon GO, Habitica, Apple Watch). Each one maps to a proven psychological driver and is phased into the roadmap.
+
+### E1. Movement Streak System (Phase 1)
+**Inspired by:** Duolingo streaks (loss aversion + habit formation)
+**Psychological driver:** Loss aversion — people are more motivated to avoid losing progress than to gain new rewards.
+
+- Track consecutive days where the player logs ANY movement (walk, run, cycle, manual entry — anything)
+- Minimum threshold to count a streak day: 0.25 miles (low bar — a short walk counts)
+- The streak is **visualized through the village itself**, not an abstract counter:
+  - Day 1–6: small sprouts appear around buildings
+  - Day 7: a garden blooms (first visual milestone)
+  - Day 14: a fountain appears in the village center
+  - Day 30: village walls get built
+  - Day 60+: advanced structures (watchtower, market square, etc.)
+- **Breaking a streak does NOT reset your village visuals** — buildings stay. But growth pauses and gardens start to wilt after 48 hours of inactivity. This means losing a streak feels like slowing down, not losing everything.
+- **Streak Shield**: earned by banking 3+ miles in a single day. Grants one free "miss day" protection. Max 2 shields stored at a time. (Equivalent of Duolingo's Streak Freeze but earned through effort, not purchased)
+- Morale resource gets a passive +5 boost per active streak day
+
+### E2. Rally System — Social Validation (Phase 1)
+**Inspired by:** Strava's kudos system (social proof + validation)
+**Psychological driver:** Social validation — people are motivated when others notice and acknowledge their effort.
+
+- When a faction member completes any activity, it appears in the faction feed as a narrated RPG event:
+  - "⚔️ ShadowWalker patrolled the eastern woods — +12 Food for the kingdom"
+  - "🏔️ TrailBlazer traversed the mountains — 1.5 miles banked"
+  - "🛡️ IronMage defended the village walls"
+- Other faction members can tap a **"Rally"** button on the event (equivalent of Strava's kudos)
+- Each Rally gives the original player a small morale boost (+2 Morale, max 10 per day from Rallies)
+- Rally count is visible on the event ("4 allies rallied behind you!")
+- Weekly "Most Rallied" highlight in the faction feed — the person who inspired the most support
+
+### E3. Random Quest Events — Narrative Hooks (Phase 1)
+**Inspired by:** Zombies, Run! (narrative immersion) + Pokémon GO (variable rewards)
+**Psychological driver:** Variable reward schedule — unpredictable rewards keep engagement high because the brain stays curious.
+
+- 1–3 random quest events generated per day per player (in addition to standard allocations)
+- Events pop up as notifications and appear on the home screen
+- Each event has a narrative flavor and a time window:
+  - "🐺 A wolf pack was spotted near the forest — hunt them before sundown! (Walk 0.5 mi in the next 6 hours → +30 Food + 5 bonus Morale)"
+  - "💊 A traveling healer is passing through — intercept them! (Any movement of 0.3 mi in 4 hours → +25 Medicine)"
+  - "📦 A supply caravan broke down nearby — help them for a reward! (1.0 mi by end of day → +15 to all resources)"
+  - "🏴 Scouts report raiders approaching — rally your faction! (Faction collectively needs 5 miles in 8 hours → everyone gets +20 Wood)"
+- Events expire if not completed — creating light urgency without punishment
+- Rewards are intentionally variable (different amounts, different resources) to keep the dopamine loop active
+- Faction-wide events require collective action and drive social coordination
+
+### E4. Rest Day Mechanic — Graceful Failure (Phase 1)
+**Inspired by:** Apple Watch's ring pause + Duolingo's insight that making streaks easier to maintain increases long-term engagement
+**Psychological driver:** Autonomy + guilt prevention — users who feel trapped by a streak system eventually resent it and quit.
+
+- Players can declare **1 Rest Day per week** (manual toggle on home screen)
+- On a Rest Day:
+  - No resource decay occurs
+  - Streak is preserved (counts as a continuation)
+  - Village shows a celebration: villagers resting, festival banners, campfire
+  - Morale gets +10 bonus ("Your village celebrated a day of rest!")
+- The message is explicit: **rest is part of the journey, not a failure**
+- Rest Days reset every Monday at midnight (server time)
+- If a player misses a day WITHOUT declaring a Rest Day:
+  - Streak pauses (not resets) for 24 hours — they can resume the next day
+  - After 48 hours of no activity and no Rest Day: streak breaks, but village visuals remain (just growth stops)
+- This prevents the toxic pattern where people resent the app for making them feel guilty on sick days, travel days, or just when life gets busy
+
+### E5. World Events — Seasonal FOMO (Phase 2)
+**Inspired by:** Pokémon GO's live ops calendar (event-driven engagement surges)
+**Psychological driver:** Scarcity + FOMO — limited-time events create urgency and give players something to talk about.
+
+- Monthly themed events lasting 5–7 days each:
+  - **"The Great Migration"** — faction-wide movement challenge. Each faction races to log the most collective miles. Top factions earn an exclusive village cosmetic (golden gate, dragon banner, etc.)
+  - **"Winter Siege"** — daily defense quests. Raiders attack more frequently; players must be more active to protect their village. Reward: unique winter-themed village buildings
+  - **"Harvest Festival"** — all Food allocations give 2x resources. Reward: animated harvest decorations for the village
+  - **"The Fog Recedes"** — all Scout allocations reveal 2x map tiles. Reward: a unique map marker style
+  - **"Faction Forge"** — faction members pool miles to build a collective monument. If completed, it appears on ALL faction members' maps permanently
+- Limited-time cosmetic rewards that can ONLY be earned during the event:
+  - Village skins (seasonal decorations, unique buildings, banner colors)
+  - These are visible to other players when they view your village — creating social proof and aspiration
+- Events are announced 3 days in advance via push notification to build anticipation
+- Post-event recap: "Your faction earned the Golden Gate! 3 of 8 factions completed The Great Migration"
+
+### E6. Home Screen Widget — Ambient Awareness (Phase 2)
+**Inspired by:** Duolingo's iOS widget (60% engagement increase) + Apple Watch rings
+**Psychological driver:** Ambient cue — a passive visual reminder that pulls you back without a notification.
+
+- iOS and Android home screen widget showing:
+  - Current movement streak (flame icon + day count)
+  - Village health at a glance (4 mini resource bars or a simple village icon that changes color: green → yellow → red)
+  - Miles in bank
+  - Active random quest event (if any) with time remaining
+- Widget taps deep-link directly into the relevant screen (e.g. tap resource bars → village view, tap quest → allocate screen)
+- The widget is a **passive pull** — no notification needed. Every time the player glances at their phone, they see their village status
+- React Native widget implementation via `react-native-widget-extension` (iOS) and `react-native-android-widget` (Android)
+
+### E7. Evening Check-In Pull — Social Engagement After Hours (Phase 2)
+**Inspired by:** Strava's evening engagement spike (users check friends' progress after hours)
+**Psychological driver:** Curiosity + social belonging — "what did my faction do today?"
+
+- Daily faction digest push notification at ~7:30 PM local time:
+  - "Your faction logged 12.4 miles today. ShadowWalker was the top mover! 🏔️ See the feed →"
+  - Or: "The Ironhold faction is 3.2 miles from completing this week's quest — can you push them over the line? 💪"
+- Notification deep-links to the faction activity feed
+- The feed is designed to be **browsable and social** — not just a log:
+  - RPG-narrated events with Rally buttons
+  - Weekly quest progress bar at the top
+  - "Today's highlights" section showing biggest single activity, longest streak in faction, most rallied event
+- This creates a **second daily touchpoint** that isn't about exercise — it's about community. Players open the app in the evening to see what their friends did, give Rallies, and check faction quest progress. This mirrors Strava's most powerful engagement pattern.
+
+### E8. Achievement & Badge System (Phase 1)
+**Inspired by:** Pokémon GO medals, Strava trophies, Xbox achievements
+**Psychological driver:** Completionism + identity — players collect achievements as proof of who they are.
+
+- Achievements are permanent, never lost, and visible on the player's profile
+- Other players can browse someone's achievements when viewing their profile in a faction
+- Achievements organized into categories:
+
+**Movement achievements:**
+| Badge | Requirement |
+|---|---|
+| First Steps | Complete your first movement session |
+| Mile Marker | Bank 10 total miles |
+| Marathon | Bank 26.2 total miles |
+| Century | Bank 100 total miles |
+| Thousand-Miler | Bank 1,000 total miles |
+
+**Streak achievements:**
+| Badge | Requirement |
+|---|---|
+| Spark | 3-day streak |
+| Flame | 7-day streak |
+| Bonfire | 30-day streak |
+| Inferno | 60-day streak |
+| Eternal Flame | 100-day streak |
+| Undying | 365-day streak |
+
+**Village achievements:**
+| Badge | Requirement |
+|---|---|
+| Founder | Create your village |
+| Provider | Allocate 50 total miles |
+| Architect | Reach max village visual level |
+| Survivor | Recover from Ruined state |
+| Wanderer | Complete first Expedition |
+| Cartographer | Explore 50 hex tiles |
+
+**Exploration achievements:**
+| Badge | Requirement |
+|---|---|
+| Collector | Gather 25 resource caches from explored tiles |
+| Monday Explorer | Check the map within 1 hour of weekly tile refresh 4 weeks in a row |
+| Rare Find | Discover your first rare spawn |
+| Treasure Hunter | Discover 10 rare spawns |
+
+**Relocation achievements:**
+| Badge | Requirement |
+|---|---|
+| Nomad | Relocate your village for the first time |
+| Wanderlust | Relocate 5 times |
+| World Traveler | Relocate to a different continent |
+| Good Neighbor | Relocate within 10 miles of a faction member |
+
+**Building achievements:**
+| Badge | Requirement |
+|---|---|
+| First Foundation | Build your first building |
+| Village Planner | Build all 6 buildings (any level) |
+| Master Builder | Upgrade any building to Level 3 |
+| Fortress | Upgrade all 6 buildings to Level 3 |
+| Quarry Worker | Accumulate 500 total Stone |
+
+**Social achievements:**
+| Badge | Requirement |
+|---|---|
+| Ally | Join a faction |
+| Rallier | Give 50 Rallies |
+| Inspirer | Receive 100 Rallies |
+| Commander | Complete 10 faction quests |
+| Envoy | Trigger a Faction Envoy event |
+| Challenger | Win a 1v1 Friend Challenge |
+
+- Each achievement awards a gem bonus (10–100 gems depending on difficulty)
+- Rare/hard achievements display with a glow effect on the profile
+
+### E9. Onboarding Quest Chain (Phase 1)
+**See "Onboarding Design" section above.** This is the guided 7-day quest sequence that teaches every mechanic through play, not text. Integrated into Phase 1 as a critical retention feature.
+
+### E10. Village Chronicle — Progress Journal (Phase 1)
+**Inspired by:** Zombies, Run! mission log, RPG quest journals
+**Psychological driver:** Narrative identity — people stay engaged when they can look back and see a meaningful story of their effort.
+
+- An auto-generated timeline of the player's journey, written in RPG narrative style
+- Entries are created automatically on major events:
+  - "Day 1 — The village of Thornhaven was founded in the misty hills of northern England."
+  - "Day 7 — The first garden bloomed. The villagers celebrated."
+  - "Day 14 — A great expedition to Chicago revealed ancient ruins in the western territories."
+  - "Day 30 — The village walls were erected. Thornhaven stands strong."
+  - "Day 45 — ShadowWalker received 50 rallies from allies. The realm takes notice."
+- Players can add their own notes to chronicle entries (optional)
+- The Chronicle is a scrollable timeline view accessible from the Profile tab
+- Sharing: players can share a Chronicle entry as an image card (for social media) — generates a styled card with the entry text and a mini village illustration
+
+### E11. Friend Challenges — 1v1 Competition (Phase 2)
+**Inspired by:** Strava head-to-head segments, Apple Watch activity sharing competitions
+**Psychological driver:** Direct competition + accountability — challenging a specific person is more motivating than a leaderboard of strangers.
+
+- Any player can challenge one friend (must be in same faction or mutual follow) to a 1v1
+- Challenge types:
+  - **Distance Duel**: "Who can bank more miles this week?"
+  - **Streak Standoff**: "Who can maintain their streak longer starting now?"
+  - **Quest Race**: "Who can complete more random quests in 5 days?"
+- Duration: 3, 5, or 7 days (challenger picks)
+- Both players see a live comparison card on their home screen during the challenge
+- Winner gets: +30 Gems, a temporary trophy icon on their profile for 7 days
+- Loser gets: a funny cosmetic on their village for 24 hours (white surrender flag, sleeping villagers, etc.) — lighthearted, never mean
+- Both players get a participation gem bonus (+10 Gems) regardless of outcome — encouraging people to accept challenges
+- Max 1 active challenge at a time (to prevent notification fatigue)
+
+### E12. Comeback Mechanic — "Return of the Wanderer" (Phase 1)
+**Inspired by:** Duolingo's streak repair + mobile game lapsed-player campaigns
+**Psychological driver:** Reducing re-entry friction — the #1 reason lapsed users don't return is feeling too far behind.
+
+- Triggers when a player returns after 3+ days of inactivity
+- Instead of showing a ruined village with guilt, show a **welcoming narrative**:
+  - "The Wanderer returns! Your village has been waiting for you."
+  - "Your people kept the fires burning, but they need your leadership."
+- **Comeback Quest Chain** (3 quests over 3 days):
+  - Quest 1: "Walk any distance to relight the village beacon" → Restores village from Ruined state + sets all resources to 40/100
+  - Quest 2: "Bank 0.5 miles to restock supplies" → +20 to all resources + streak restarts at Day 1
+  - Quest 3: "Rally 2 faction members to announce your return" → +30 Morale + "Wanderer Returns" event in faction feed
+- On completing all 3: "Your village is restored! The realm celebrates your return. 🏰"
+- Gem bonus: +25 Gems for completing the comeback chain
+- Push notification after 3 days of inactivity: "Your village misses you. Come back and your people will celebrate! 🔥" (sent once, not repeatedly — never spam lapsed users)
+- After 7 days of inactivity: one final notification: "The Wanderer's path awaits. Your village is ready when you are." Then silence — respect their choice.
+- Realm Pass subscribers get an enhanced comeback with resources starting at 60/100 instead of 40/100
+
+---
+
+## Screen Map
+
+```
+App
+├── Auth
+│   ├── Splash / Onboarding (explain the concept)
+│   ├── Sign In (Google / Apple via Supabase Auth)
+│   └── Village Setup
+│       ├── Name your village
+│       ├── Place village on world map (tap anywhere on Earth)
+│       └── Optional: "Use my current location"
+│
+├── Home (Village View)
+│   ├── Village scene with 6 building slots (tap empty slot → build, tap building → upgrade/info)
+│   ├── Resource meters: Food / Medicine / Wood / Morale / Stone
+│   ├── Movement Streak display (flame icon + day count)
+│   ├── Mile Bank display ("You have 3.2 miles to allocate")
+│   ├── Active Random Quest Event (if any, with timer)
+│   ├── Rest Day toggle (1 per week)
+│   ├── Allocate Miles button → Allocate Screen
+│   └── Quick-start movement button
+│
+├── Allocate Miles Screen
+│   ├── Mile bank balance at top
+│   ├── List of allocation options with mile costs
+│   ├── Player chooses one or more allocations
+│   └── Confirm → resources update, miles deducted
+│
+├── Gem Shop
+│   ├── Current gem balance
+│   ├── Spend gems (shields, rest days, recovery, etc.)
+│   ├── Buy gem packs (IAP)
+│   ├── Supporter Pack promo (if not purchased)
+│   └── Realm Pass promo (Phase 2)
+│
+├── Activity Log
+│   ├── Start Outdoor Movement → Movement Tracker
+│   └── Log Treadmill Run → Manual Entry Form
+│       ├── Distance input
+│       ├── Duration input
+│       └── Or: "Import from Apple Health / Google Fit"
+│
+├── Movement Tracker (Active Outdoor Session)
+│   ├── Live GPS map with route
+│   ├── Distance / pace / time HUD
+│   ├── End Run → miles added to bank → prompt to allocate
+│   └── Save & allocate later option
+│
+├── World Map
+│   ├── Mapbox + custom fantasy style overlay
+│   ├── Player's village marker at origin
+│   ├── Fog of war (explored vs unexplored hex tiles)
+│   ├── Landmark icons (forests, ruins, markets)
+│   └── Faction members' village markers (opt-in)
+│
+├── Faction
+│   ├── Faction overview (name, members, collective resources)
+│   ├── Weekly quest progress + contribute miles
+│   ├── Activity feed with Rally buttons (Supabase Realtime)
+│   ├── Today's Highlights (top mover, longest streak, most rallied)
+│   ├── Leaderboard
+│   └── World Event progress (during active events)
+│
+├── Village Chronicle
+│   ├── Scrollable timeline of major events (RPG-narrated)
+│   ├── Player can add notes to entries
+│   └── Share entry as styled image card
+│
+├── Achievements
+│   ├── Grid of all badges (earned = full color, unearned = greyed)
+│   ├── Categories: Movement, Streak, Village, Social
+│   └── Tap badge → details + gem reward
+│
+└── Profile
+    ├── Stats (total miles, allocations, village age, longest streak, gems earned)
+    ├── Achievement showcase (top 3 pinned badges)
+    ├── Founder badge / Realm Pass badge (if applicable)
+    ├── Active 1v1 Challenge (if any)
+    ├── Village Chronicle link
+    └── Settings (notifications, units mi/km, health sync, widget config)
+```
+
+---
+
+## Data Models (Supabase / PostgreSQL)
+
+```sql
+-- Users (managed by Supabase Auth, extended here)
+profiles (
+  id uuid references auth.users primary key,
+  username text unique,
+  created_at timestamptz,
+  units text default 'miles',  -- 'miles' | 'km'
+  is_supporter boolean default false,  -- true if Supporter Pack purchased
+  is_realm_pass boolean default false,  -- true if active Realm Pass subscription
+  onboarding_completed boolean default false,
+  avatar jsonb default '{}'::jsonb  -- composable layer IDs: {skin_tone, hair_style, hair_color, face_shape, eyes, outfit}
+)
+
+-- Villages
+villages (
+  id uuid primary key,
+  user_id uuid references profiles,
+  name text,
+  origin_lat double precision,   -- freely chosen, not real GPS
+  origin_lng double precision,
+  food int default 80,
+  medicine int default 80,
+  wood int default 80,
+  morale int default 80,
+  stone int default 0,            -- building material, no decay, no cap
+  mile_bank decimal default 0,   -- unspent miles
+  created_at timestamptz,
+  grace_period_ends_at timestamptz,  -- 24hrs after created_at
+  last_decay_at timestamptz,
+  state text default 'thriving',  -- 'thriving' | 'struggling' | 'ruined'
+  last_relocated_at timestamptz,     -- tracks last move for analytics, no cooldown enforced
+  total_relocations int default 0
+  streak_visual_level int default 0  -- controls which streak-based visuals are shown (0=none, 1=sprouts, 2=garden, etc.)
+)
+
+-- Activity Log (outdoor GPS + treadmill)
+activities (
+  id uuid primary key,
+  user_id uuid references profiles,
+  distance_miles decimal,
+  duration_seconds int,
+  movement_type text,  -- 'walking' | 'running' | 'cycling' | 'hiking' | 'treadmill' | 'indoor' | 'other'
+  source text,  -- 'gps' | 'manual' | 'healthkit' | 'google_health'
+  multiplier decimal default 1.0,  -- mile multiplier applied based on movement type
+  activity_type text default 'fitness',  -- 'fitness' | 'expedition'
+  route_storage_path text,  -- GeoJSON path in Supabase Storage, null for treadmill
+  started_at timestamptz,
+  ended_at timestamptz,
+  miles_allocated boolean default false
+)
+
+-- Expeditions (road trips / travel events)
+expeditions (
+  id uuid primary key,
+  user_id uuid references profiles,
+  name text,  -- player-named, e.g. "Trip to Chicago"
+  distance_miles decimal,
+  origin_lat double precision,
+  origin_lng double precision,
+  destination_lat double precision,
+  destination_lng double precision,
+  reward_type text,  -- 'fog_reveal' | 'rare_landmark' | 'outpost' | 'legendary_site'
+  reward_expires_at timestamptz,  -- for temporary outposts / bonus quest windows
+  created_at timestamptz
+)
+
+-- Outposts (secondary map anchors from travel)
+outposts (
+  id uuid primary key,
+  user_id uuid references profiles,
+  expedition_id uuid references expeditions,
+  name text,
+  lat double precision,
+  lng double precision,
+  is_permanent boolean default false,  -- true if upgraded to Waypoint
+  expires_at timestamptz,  -- null if permanent
+  created_at timestamptz
+)
+
+-- Mile Allocations
+allocations (
+  id uuid primary key,
+  user_id uuid references profiles,
+  village_id uuid references villages,
+  type text,  -- 'hunt_food' | 'gather_medicine' | 'chop_wood' | 'scout' | 'move_camp' | 'explore' | 'defend' | 'faction'
+  miles_spent decimal,
+  created_at timestamptz
+)
+
+-- Map Tiles (fog of war)
+map_tiles (
+  id uuid primary key,
+  user_id uuid references profiles,
+  hex_q int,   -- hex grid coordinates
+  hex_r int,
+  explored_at timestamptz
+)
+
+-- Factions
+factions (
+  id uuid primary key,
+  name text,
+  created_by uuid references profiles,
+  created_at timestamptz,
+  collective_miles decimal default 0
+)
+
+-- Faction Members
+faction_members (
+  faction_id uuid references factions,
+  user_id uuid references profiles,
+  joined_at timestamptz,
+  role text default 'member',  -- 'leader' | 'member'
+  primary key (faction_id, user_id)
+)
+
+-- Faction Quests
+faction_quests (
+  id uuid primary key,
+  faction_id uuid references factions,
+  target_miles decimal,
+  current_miles decimal default 0,
+  deadline timestamptz,
+  reward text,
+  status text default 'active'  -- 'active' | 'completed' | 'failed'
+)
+
+-- Faction Events (Supabase Realtime feed)
+faction_events (
+  id uuid primary key,
+  faction_id uuid references factions,
+  user_id uuid references profiles,
+  event_type text,  -- 'run_logged' | 'allocation_made' | 'miles_contributed' | 'quest_completed' | 'rally_received' | 'world_event'
+  description text,
+  created_at timestamptz
+)
+
+-- Movement Streaks
+streaks (
+  id uuid primary key,
+  user_id uuid references profiles,
+  current_streak int default 0,
+  longest_streak int default 0,
+  last_activity_date date,           -- last date any movement was logged
+  streak_shields int default 0,      -- max 2, earned by banking 3+ mi in a day
+  rest_days_used_this_week int default 0,  -- resets Monday midnight
+  rest_day_week_start date,          -- Monday of current tracking week
+  updated_at timestamptz
+)
+
+-- Rallies (social validation on faction events)
+rallies (
+  id uuid primary key,
+  faction_event_id uuid references faction_events,
+  from_user_id uuid references profiles,   -- who gave the rally
+  to_user_id uuid references profiles,     -- who receives the morale boost
+  created_at timestamptz,
+  unique (faction_event_id, from_user_id)  -- one rally per user per event
+)
+
+-- Random Quest Events
+random_quests (
+  id uuid primary key,
+  user_id uuid references profiles,
+  title text,               -- "A wolf pack was spotted!"
+  description text,          -- narrative flavor text
+  required_miles decimal,    -- movement needed to complete
+  reward_type text,          -- 'food' | 'medicine' | 'wood' | 'morale' | 'all'
+  reward_amount int,
+  bonus_morale int default 0,
+  is_faction_wide boolean default false,  -- true = requires faction collective action
+  faction_id uuid references factions,    -- null unless faction-wide
+  expires_at timestamptz,    -- quest disappears after this
+  status text default 'active',  -- 'active' | 'completed' | 'expired'
+  created_at timestamptz
+)
+
+-- World Events (seasonal / monthly)
+world_events (
+  id uuid primary key,
+  name text,                 -- "The Great Migration"
+  description text,
+  event_type text,           -- 'faction_race' | 'defense' | 'harvest' | 'exploration' | 'faction_forge'
+  starts_at timestamptz,
+  ends_at timestamptz,
+  reward_cosmetic text,      -- unique cosmetic item ID
+  status text default 'upcoming'  -- 'upcoming' | 'active' | 'completed'
+)
+
+-- World Event Participation (per faction)
+world_event_participation (
+  id uuid primary key,
+  world_event_id uuid references world_events,
+  faction_id uuid references factions,
+  progress_miles decimal default 0,
+  target_miles decimal,
+  reward_earned boolean default false,
+  completed_at timestamptz
+)
+
+-- Tile Dynamic Content (weekly refresh)
+tile_content (
+  id uuid primary key,
+  user_id uuid references profiles,
+  hex_q int,                    -- hex grid coordinates (matches map_tiles)
+  hex_r int,
+  content_type text,            -- 'resource_cache' | 'encounter' | 'seasonal' | 'rare_spawn'
+  content_data jsonb,           -- {resource: 'food', amount: 8, quest_text: "A berry bush...", required_miles: 0.25}
+  status text default 'active', -- 'active' | 'collected' | 'expired'
+  spawned_at timestamptz,
+  expires_at timestamptz,       -- 7 days after spawn
+  collected_at timestamptz
+)
+
+-- Village Relocation History
+relocation_history (
+  id uuid primary key,
+  village_id uuid references villages,
+  user_id uuid references profiles,
+  from_lat double precision,
+  from_lng double precision,
+  to_lat double precision,
+  to_lng double precision,
+  distance_miles decimal,
+  miles_spent decimal,
+  resources_spent jsonb,       -- {wood: 40, stone: 20, food: 20}
+  created_at timestamptz
+)
+
+-- Village Buildings
+buildings (
+  id uuid primary key,
+  village_id uuid references villages,
+  user_id uuid references profiles,
+  slot_position int,           -- 1-6 (maps to village layout zones)
+  building_type text,          -- 'farm' | 'herbalist_hut' | 'lumber_mill' | 'watchtower' | 'tavern' | 'storehouse'
+  level int default 1,         -- 1, 2, or 3
+  built_at timestamptz,
+  upgraded_at timestamptz
+)
+
+-- Village Cosmetics (earned from events)
+village_cosmetics (
+  id uuid primary key,
+  user_id uuid references profiles,
+  village_id uuid references villages,
+  cosmetic_type text,        -- 'building' | 'decoration' | 'banner' | 'gate' | 'monument'
+  cosmetic_id text,          -- references a cosmetic asset
+  earned_from text,          -- 'world_event' | 'streak_milestone' | 'faction_quest'
+  earned_at timestamptz
+)
+
+-- Gems (virtual currency)
+gem_balances (
+  user_id uuid references profiles primary key,
+  balance int default 0,
+  total_earned int default 0,
+  total_spent int default 0,
+  updated_at timestamptz
+)
+
+-- Gem Transactions (audit log)
+gem_transactions (
+  id uuid primary key,
+  user_id uuid references profiles,
+  amount int,                -- positive = earned, negative = spent
+  reason text,               -- 'movement' | 'quest' | 'streak_milestone' | 'rally_given' | 'faction_quest' | 'purchase' | 'spent_shield' | 'spent_rest_day' | etc.
+  reference_id uuid,         -- optional: links to the activity/quest/event that triggered it
+  created_at timestamptz
+)
+
+-- Achievements / Badges
+achievements (
+  id uuid primary key,
+  user_id uuid references profiles,
+  badge_id text,             -- 'first_steps' | 'mile_marker' | 'marathon' | 'spark' | 'flame' | etc.
+  category text,             -- 'movement' | 'streak' | 'village' | 'social'
+  earned_at timestamptz,
+  unique (user_id, badge_id)
+)
+
+-- Village Chronicle (progress journal)
+chronicle_entries (
+  id uuid primary key,
+  user_id uuid references profiles,
+  entry_type text,           -- 'village_founded' | 'streak_milestone' | 'expedition' | 'achievement' | 'faction_joined' | 'comeback' | 'custom'
+  title text,                -- "The First Garden Bloomed"
+  narrative text,            -- RPG-flavored description
+  user_note text,            -- optional player-added note
+  reference_id uuid,         -- optional link to related record
+  created_at timestamptz
+)
+
+-- Friend Challenges (1v1)
+friend_challenges (
+  id uuid primary key,
+  challenger_id uuid references profiles,
+  challenged_id uuid references profiles,
+  challenge_type text,       -- 'distance_duel' | 'streak_standoff' | 'quest_race'
+  duration_days int,         -- 3, 5, or 7
+  challenger_progress decimal default 0,
+  challenged_progress decimal default 0,
+  winner_id uuid references profiles,
+  status text default 'pending',  -- 'pending' | 'active' | 'completed' | 'declined'
+  starts_at timestamptz,
+  ends_at timestamptz,
+  created_at timestamptz
+)
+
+-- Purchases (IAP tracking)
+purchases (
+  id uuid primary key,
+  user_id uuid references profiles,
+  product_id text,           -- 'supporter_pack' | 'gems_50' | 'gems_175' | 'gems_325' | 'gems_750' | 'realm_pass_monthly' | 'realm_pass_annual'
+  purchase_type text,        -- 'one_time' | 'subscription' | 'consumable'
+  amount_cents int,
+  platform text,             -- 'ios' | 'android'
+  receipt_id text,           -- app store receipt for validation
+  status text,               -- 'active' | 'expired' | 'refunded'
+  purchased_at timestamptz,
+  expires_at timestamptz     -- null for one-time, set for subscriptions
+)
+
+-- Game Config (tunable balance values — never hardcode these)
+game_config (
+  key text primary key,          -- 'decay_rate_per_tick', 'gem_earn_per_movement', etc.
+  value jsonb,                   -- flexible: number, string, object
+  description text,
+  updated_at timestamptz
+)
+-- Seed with defaults: decay_rate=8, decay_tick_hours=6, gem_per_movement=3, etc.
+
+-- Analytics Events
+analytics_events (
+  id uuid primary key,
+  user_id uuid references profiles,
+  event_name text,           -- 'movement_completed', 'miles_allocated', 'building_built', etc.
+  event_data jsonb,          -- flexible payload: {distance: 1.5, type: 'walking', source: 'gps'}
+  created_at timestamptz
+)
+-- Index on (event_name, created_at) for dashboard queries
+
+-- Blocked Users
+blocked_users (
+  blocker_id uuid references profiles,
+  blocked_id uuid references profiles,
+  created_at timestamptz,
+  primary key (blocker_id, blocked_id)
+)
+
+-- User Reports
+reports (
+  id uuid primary key,
+  reporter_id uuid references profiles,
+  reported_user_id uuid references profiles,
+  report_type text,          -- 'username' | 'village_name' | 'faction_name' | 'behavior'
+  description text,
+  status text default 'pending',  -- 'pending' | 'reviewed' | 'actioned' | 'dismissed'
+  created_at timestamptz
+)
+
+-- Onboarding Progress
+onboarding_progress (
+  user_id uuid references profiles primary key,
+  current_day int default 1, -- 1-7
+  day_1_completed boolean default false,
+  day_2_completed boolean default false,
+  day_3_completed boolean default false,
+  day_4_completed boolean default false,
+  day_5_completed boolean default false,
+  day_6_completed boolean default false,
+  day_7_completed boolean default false,
+  chain_completed boolean default false,
+  completed_at timestamptz
+)
+```
+
+---
+
+## Architecture Overview
+
+```
+Mobile App (React Native)
+        │
+        ├──► Supabase (Auth, DB, Realtime subscriptions)
+        │
+        └──► Vercel (Express API — serverless functions)
+                  │
+                  ├──► Supabase DB (via supabase-js)
+                  ├──► Supabase Storage (GPS route GeoJSON)
+                  └──► Expo Push Notification Service
+
+Vercel Cron (every 6 hours)
+        │
+        └──► /api/cron/village-decay
+                  └──► Supabase DB (update resource levels, check grace period)
+```
+
+---
+
+## Testing Strategy
+
+#### Game Balance Testing
+The gem economy, decay rates, and building effects are the most sensitive balance areas. Test them with math before code.
+
+**Balance spreadsheet (create before building):**
+- Model a "typical week" for a casual player (0.5 mi/day) and a dedicated player (3 mi/day)
+- Calculate: miles earned → allocations possible → resource levels → decay net effect → building impact
+- Verify: casual player can survive but needs to move daily. Dedicated player thrives and can invest in buildings.
+- Verify: gem earn rate allows purchasing 1 Streak Shield per week for a casual player
+- Verify: all 6 buildings at Lv 1 take ~4 weeks for a dedicated player
+
+**Adjustable constants (never hardcode):**
+Store all balance values in a Supabase `game_config` table (or environment variables) so they can be tuned without deploying a new app version:
+- `DECAY_RATE_PER_TICK` (default: 8)
+- `DECAY_TICK_HOURS` (default: 6)
+- `BUILDING_OUTPUT_MULTIPLIER` (default: 1.0)
+- `GEM_EARN_PER_MOVEMENT` (default: 3)
+- `QUEST_REWARD_MIN` / `QUEST_REWARD_MAX`
+- `STREAK_SHIELD_COST_GEMS` (default: 30)
+- `RELOCATION_COST_MULTIPLIER` (default: 1.0)
+- All allocation mile costs
+
+**Automated balance tests:**
+- Write unit tests that simulate 30 days of play at different activity levels
+- Assert: no player can sustain a village with zero movement (even with maxed buildings)
+- Assert: a player moving 0.5 mi/day can keep all resources above 0
+- Assert: gem economy doesn't inflate beyond target rates
+
+#### Code Testing
+- **Unit tests**: Jest for backend logic (decay calculations, allocation processing, streak evaluation, gem transactions)
+- **Integration tests**: Test Supabase RLS policies, cron job effects, API endpoints
+- **E2E tests**: Detox (React Native) for critical flows: onboarding, movement tracking, allocation, building construction
+- **Manual QA**: movement tracking on real devices (GPS accuracy varies wildly between devices)
+
+---
+
+## Analytics & Success Metrics
+
+Track these from Day 1 to know if the game is working. Log events to Supabase (or a lightweight analytics service like PostHog free tier).
+
+### North Star Metric
+**Weekly Active Movers (WAM)**: unique users who logged at least one movement session in the last 7 days. This is the single metric that tells you if the core loop is working. Everything else is secondary.
+
+### Key Metrics Dashboard
+
+**Retention:**
+| Metric | Target (healthy) | How to measure |
+|---|---|---|
+| Day 1 retention | >40% | Users who return the day after signup |
+| Day 7 retention | >20% | Users who return 7 days after signup |
+| Day 30 retention | >10% | Users who return 30 days after signup |
+| Onboarding completion (Day 7 chain) | >60% | Users who finish all 7 onboarding quests |
+
+**Engagement:**
+| Metric | What it tells you |
+|---|---|
+| Avg miles/user/week | Is movement frequency healthy? |
+| Avg allocations/user/day | Are players engaging with the resource system? |
+| Quests completed/day | Are random quests compelling? |
+| Rally rate | Is the social layer working? (Rallies given / faction events seen) |
+| Faction join rate | % of users in a faction by Day 7 |
+| Building construction rate | % of users who build first building by Day 14 |
+
+**Monetization (Phase 1+):**
+| Metric | What it tells you |
+|---|---|
+| Supporter Pack conversion | % of users who buy it (target: 2-5%) |
+| Gem purchase rate | % of users who buy gems (target: 1-3%) |
+| ARPU (avg revenue per user) | Revenue health |
+| Gem earn/spend ratio | Is the gem economy balanced? (target: users spend 40-60% of earned gems) |
+
+**Health signals (watch for problems):**
+| Signal | Problem it indicates |
+|---|---|
+| Day 1 retention <30% | Onboarding is broken — players don't understand the loop |
+| Avg miles/user declining week-over-week | Core movement motivation is failing |
+| >50% of users never build a building | Building system is confusing or costs are too high |
+| Rally rate <10% | Social features aren't visible or compelling enough |
+| >30% of villages in Ruined state | Decay is too aggressive or comeback path is too hard |
+| Manual entry >40% of all activities | Possible cheating problem or GPS tracking issues |
+
+### Event Logging
+Log these events to Supabase (table: `analytics_events`):
+- `app_open`, `session_start`, `session_end`
+- `movement_started`, `movement_completed` (with distance, type, source)
+- `miles_allocated` (with allocation type, amount)
+- `quest_generated`, `quest_completed`, `quest_expired`
+- `building_built`, `building_upgraded`
+- `streak_continued`, `streak_broken`
+- `rally_given`, `rally_received`
+- `faction_joined`, `faction_left`
+- `gem_earned`, `gem_spent`, `gem_purchased`
+- `supporter_pack_purchased`, `realm_pass_subscribed`
+- `onboarding_step_completed` (with day number)
+- `comeback_triggered`, `comeback_completed`
+- `achievement_unlocked`
+
+---
+
+## Phase Roadmap
+
+### Phase 0 — Core Playable (Build This First)
+The absolute minimum to have a playable game you can put on your phone and test. No engagement systems, no social features, no monetization. Just the core loop: **move → bank miles → allocate → village survives**. Target: 2–4 weeks of development.
+
+#### Build Order (sequential — each step depends on the previous)
+
+**Step 1: Scaffold + Auth (Days 1–2)**
+- [ ] React Native bare workflow + TypeScript + ESLint + Prettier
+- [ ] Verify builds and runs on both iOS Simulator AND Android Emulator
+- [ ] Supabase project: create tables (profiles, villages, activities, allocations)
+- [ ] Supabase Auth: Google Sign-In (both platforms) + Apple Sign-In (iOS — required for App Store if Google Sign-In is offered)
+- [ ] Vercel project: deploy empty Express API
+- [ ] Basic navigation structure (React Navigation) with safe area handling
+- [ ] Set up RevenueCat project (free tier) — even though IAP is Phase 1, the SDK should be integrated early
+
+**Step 2: Village Screen — Static (Days 3–5)**
+- [ ] Village view UI: 4 resource meters (Food, Medicine, Wood, Morale) + Stone counter
+- [ ] Mile Bank display
+- [ ] Simple village illustration (static placeholder — no buildings yet)
+- [ ] Connect to Supabase: load/save village state
+
+**Step 3: Movement Tracker (Days 6–10)**
+- [ ] Movement tracker screen: start/stop button, live GPS map (Mapbox), distance counter
+- [ ] GPS point recording with Kalman filter + accuracy threshold
+- [ ] Request location permission on first session start (not during onboarding): "When In Use" (iOS), ACCESS_FINE_LOCATION (Android)
+- [ ] Handle Android 12+ approximate location grant — prompt for precise if approximate given
+- [ ] Route recording (GeoJSON stored locally in SQLite)
+- [ ] On movement end: calculate distance, apply movement type multiplier, add miles to bank
+- [ ] Sync movement data to Supabase + route to Supabase Storage
+- [ ] Manual entry screen: distance + duration input for treadmill/indoor
+- [ ] Test GPS tracking on physical iPhone + physical Android device (emulator GPS is unreliable)
+
+**Step 4: Allocate Miles (Days 11–13)**
+- [ ] Allocate screen: list of options (Hunt Food, Gather Medicine, Chop Wood, Quarry Stone, Scout, Defend)
+- [ ] Deduct miles from bank, add resources to village
+- [ ] Verify: full core loop works end-to-end (move → bank → allocate → village resources update)
+
+**Step 5: Village Decay (Days 14–15)**
+- [ ] Vercel Cron: `/api/cron/village-decay` runs every 6 hours
+- [ ] Decay logic: -8 per resource per tick, respects 24hr grace period
+- [ ] Village state transitions: thriving → struggling (any resource <20) → ruined (all at 0 for 48hr)
+- [ ] Verify: village decays when player is inactive, recovers when they allocate
+
+**Step 6: Basic Map (Days 16–18)**
+- [ ] Mapbox world map with custom fantasy style
+- [ ] Village marker at player's chosen origin
+- [ ] Fog of war: hex grid, tiles revealed by Scout allocations
+- [ ] Hex reveal animation (golden shimmer + toast notification)
+
+**Step 7: Village Placement + Onboarding (Days 19–21)**
+- [ ] Onboarding flow: name village → place on world map → first crisis event → first movement
+- [ ] Avatar creation screen (simple: skin tone, hair, face, eyes, outfit)
+- [ ] Avatar rendering from composable SVG layers
+
+**Phase 0 is DONE when:** You can install the app **on both iOS and Android**, create a character, place a village, go for a walk, bank miles, allocate them to feed your village, watch the map reveal, and see your village decay if you stop moving. Test the full loop on a physical iPhone AND a physical Android device before moving to Phase 1.
+
+---
+
+### Phase 1 — Engagement + Social (Layer on top of Phase 0)
+Now that the core loop works, add the systems that make players come back tomorrow. Each group can be built and tested independently.
+
+#### Build Order (grouped by dependency — groups can be parallelized)
+
+**Group A: Engagement Systems (no dependencies on each other)**
+
+*Movement Streaks (E1)*
+- [ ] Streak tracking (consecutive days of any movement ≥ 0.25 mi)
+- [ ] Streak visualization through village growth (sprouts → garden → fountain → walls)
+- [ ] Streak Shield mechanic (earn by banking 3+ mi in a day, max 2 stored)
+- [ ] Streak pause on miss (24hr grace before break, visuals preserved on break)
+- [ ] Passive +5 Morale per active streak day
+- [ ] Vercel Cron: `/api/cron/check-streaks`
+
+*Rest Day (E4)*
+- [ ] Rest Day toggle on home screen (1 per week, resets Monday)
+- [ ] Rest Day: no decay, streak preserved, +10 Morale
+- [ ] Village celebration visuals on Rest Day
+- [ ] Vercel Cron: `/api/cron/reset-rest-days`
+
+*Random Quest Events (E3)*
+- [ ] Quest event generation engine (1–3 per day per player, server-side)
+- [ ] Narrative-flavored quest cards on home screen with countdown timer
+- [ ] Variable rewards (different resources, different amounts)
+- [ ] Quest expiration (no punishment, just lost opportunity)
+- [ ] Vercel Cron: `/api/cron/generate-random-quests`
+
+*Achievement System (E8)*
+- [ ] Achievement badge definitions (all categories)
+- [ ] Auto-award achievements on trigger conditions
+- [ ] Achievement profile display (grid view, earned vs unearned)
+- [ ] Gem rewards on achievement unlock
+
+*Village Chronicle (E10)*
+- [ ] Auto-generated chronicle entries on major events
+- [ ] RPG-narrated entry text from templates
+- [ ] Scrollable timeline UI
+- [ ] Optional player notes on entries
+
+*Comeback Mechanic (E12)*
+- [ ] Detect 3+ days of inactivity on app open
+- [ ] "Return of the Wanderer" welcome narrative
+- [ ] 3-quest comeback chain
+
+**Group B: Social / Factions (build together)**
+
+*Faction Core*
+- [ ] Faction create + join (up to 20 members, Open or Request mode)
+- [ ] Faction roles: Leader, Co-Leader, Member
+- [ ] Leader inactivity auto-succession (21 days)
+- [ ] Kick, leave, disband flows with cooldowns
+- [ ] Weekly faction quest (collective mile goal)
+- [ ] Contribute miles from bank to faction quest
+
+*Rally System (E2)*
+- [ ] Faction activity feed with RPG-narrated events (Supabase Realtime)
+- [ ] Rally button on each faction event
+- [ ] +2 Morale per Rally received (max 10/day)
+- [ ] Rally count visible on events
+- [ ] Weekly "Most Rallied" highlight
+
+*Faction-wide Random Quests*
+- [ ] Collective mile requirement quests for factions
+- [ ] Faction event posted on completion
+
+**Group C: Building System**
+- [ ] Village view with 6 pre-set building slots
+- [ ] Building construction flow (select → confirm → deduct → animate)
+- [ ] Building upgrade flow (Lv 1 → 2 → 3, visual changes per tier)
+- [ ] 6 buildings: Farm, Herbalist Hut, Lumber Mill, Watchtower, Tavern, Storehouse
+- [ ] Stone resource: Quarry allocation + Lumber Mill passive generation
+- [ ] Building passive effects applied during decay cron
+- [ ] Building info panel
+- [ ] Post-onboarding milestone quest: "Lay the First Stone"
+
+**Group D: Map & Living World**
+- [ ] Living World: dynamic content on explored tiles (caches, encounters, rare spawns)
+- [ ] Weekly refresh cron: `/api/cron/refresh-tile-content`
+- [ ] Mini-quest flow: tap content → movement requirement → reward
+- [ ] Landmark icons from Mapbox POIs
+- [ ] Landmark discovery rewards (+5 Gems, Chronicle entry)
+
+**Group E: Village Relocation**
+- [ ] Move Camp flow: browse map → tap → preview → confirm cost → relocate
+- [ ] Distance-scaled costs (5 tiers)
+- [ ] Fog of war reset at new location (old tiles preserved)
+- [ ] Faction Caravan Discount (10–40%)
+- [ ] Relocation history + Chronicle entry + faction event
+
+**Group F: Monetization**
+- [ ] Gem economy: earning, spending, balance tracking, transaction log
+- [ ] Streak gem multiplier (+5% at 7 days → +20% at 100 days)
+- [ ] RevenueCat integration: product configuration for iOS + Android
+- [ ] Gem purchase IAP (4 tiers) — test purchase flow on both platforms with sandbox/test accounts
+- [ ] Supporter Pack IAP ($4.99) — configure in App Store Connect + Google Play Console
+- [ ] "Restore Purchases" button in Settings (Apple REQUIRES this)
+- [ ] Receipt validation via RevenueCat (server-side, never trust client)
+
+**Group G: Content Pipeline**
+- [ ] Random quest templates (40), Chronicle templates (25), Faction narrations (20)
+- [ ] Achievement descriptions (25), Building descriptions (18)
+- [ ] AI-assisted batch generation pre-launch
+
+**Group H: Onboarding (build LAST — needs all other systems working)**
+- [ ] 7-day guided quest chain
+- [ ] First-session crisis event
+- [ ] Tutorial overlays for all systems
+- [ ] Post-onboarding milestone quests (5 contextual triggers)
+- [ ] Day 7 completion celebration
+
+**Group I: Infrastructure & Safety**
+- [ ] Push notifications (Expo): priority P1–P5, max 3/day — request permission after first movement (not onboarding)
+- [ ] Android 13+: request POST_NOTIFICATIONS permission at runtime
+- [ ] Android notification channels: Village Alerts, Faction Activity, Events & Quests, Reminders
+- [ ] Evening digest cron
+- [ ] Comeback notifications (Day 3 + Day 7 only)
+- [ ] Analytics event logging
+- [ ] Dark mode + colorblind meters + VoiceOver labels + reduced motion
+- [ ] 44pt touch targets + Dynamic Type
+- [ ] Village visibility settings + location fuzzing
+- [ ] Block + Report systems
+- [ ] Account deletion flow
+
+---
+
+### Phase 2 — Social Depth, Events & Widgets
+Phase 2 turns FitRealm from a game you play into a community you belong to.
+
+**World Events (E5)**
+- [ ] World event system (monthly themed events, 5–7 days each)
+- [ ] Event types: Faction Race, Defense Siege, Harvest Festival, Fog Recedes, Faction Forge
+- [ ] Limited-time cosmetic rewards (village skins, decorations, banners)
+- [ ] Event announcement push notifications (3 days before)
+- [ ] Post-event faction recap ("Your faction earned the Golden Gate!")
+- [ ] Cosmetic display system (earned cosmetics visible on village to other players)
+
+**Home Screen Widget (E6)**
+- [ ] iOS widget (`react-native-widget-extension`): streak flame, resource bars, active quest
+- [ ] Android widget (`react-native-android-widget`): same layout
+- [ ] Widget deep-links into relevant app screens
+- [ ] Widget auto-refresh every 30 minutes
+
+**Evening Check-In (E7)**
+- [ ] Daily faction digest push at ~7:30 PM local time (enhanced from Phase 1 basic version)
+- [ ] "Today's Highlights" section in faction feed (top mover, longest streak, most rallied)
+- [ ] Weekly faction leaderboard recap
+- [ ] Faction vs faction event standings (during World Events)
+
+**Health Sync & Passive Movement**
+- [ ] Apple HealthKit integration (auto-detect walks, runs, cycling, treadmill)
+- [ ] Google Health Connect integration (Android equivalent)
+- [ ] Passive step count tracking — background movement credit throughout the day
+- [ ] "We found a 1.2-mile walk — add to your mile bank?" prompt from Health data
+
+**Expeditions (full system)**
+- [ ] Expedition detection (vehicle-speed travel)
+- [ ] Expedition rewards (fog reveal, rare landmarks, outposts, legendary sites)
+- [ ] Outpost creation + upgrade to permanent Waypoint
+- [ ] Faction Envoy event (faction member visits another member's city)
+
+**Avatar Expansion**
+- [ ] Additional customization options (facial hair, accessories, hats, cloaks)
+- [ ] Movement-earned outfits (milestone unlocks: 100-mile cloak, 365-day crown)
+- [ ] Building-specific outfits (Watchtower Lv 3 → Guard Captain outfit)
+- [ ] World Event exclusive character cosmetics
+- [ ] Realm Pass premium wardrobe options
+
+**Friend Challenges (E11)**
+- [ ] 1v1 challenge system (Distance Duel, Streak Standoff, Quest Race)
+- [ ] Challenge invite + accept/decline flow
+- [ ] Live comparison card on home screen during active challenge
+- [ ] Winner/loser cosmetic rewards (trophy icon / white flag)
+- [ ] Participation gem bonus for both players
+
+**Monetization: Realm Pass (Subscription)**
+- [ ] Realm Pass subscription IAP ($3.99/mo or $29.99/yr)
+- [ ] Streak Insurance (auto-protection daily)
+- [ ] Advanced Stats dashboard (movement history, resource trends, heatmap)
+- [ ] 5 random quests/day instead of 3
+- [ ] Faction Leader Tools (analytics, custom quests)
+- [ ] World Event 1.25x progress boost
+- [ ] Enhanced comeback (resources start at 60/100)
+
+**Anti-Cheat**
+- [ ] Rate limiting on manual entries (max 10 mi/day from manual)
+- [ ] GPS route anomaly detection (teleportation, impossible speeds)
+- [ ] Background GPS for longer outdoor sessions
+
+### Phase 3 — Expansion (when you have real users)
+Phase 3 adds depth and polish. Only build this when Phase 1+2 are stable and you have real feedback.
+
+- [ ] Apple Watch native companion (workout detection, streak display on wrist)
+- [ ] Lifting / calorie burn tracking (expand beyond distance-based movement)
+- [ ] Village visual upgrades (building tiers, architectural progression)
+- [ ] Advanced village cosmetics marketplace (earn-only, never pay-to-win)
+- [ ] Move camp mechanic (spend 10 miles to relocate village origin)
+- [ ] Inter-faction trading (trade resources between factions)
+- [ ] Faction alliances and rivalries
+- [ ] Seasonal world event storylines (multi-event narrative arcs)
+- [ ] Rewarded video ads (optional, player-initiated, 5/day max)
+- [ ] Ad-free for Supporter Pack + Realm Pass holders
+- [ ] Evaluate AWS migration only if Supabase/Vercel limits are hit
+
+---
+
+## App Store Strategy
+
+#### App Name
+"FitRealm" is the working title. Before launch, verify:
+- Trademark search (USPTO for US, similar for other regions)
+- App Store name availability (both iOS App Store and Google Play)
+- Domain availability (fitrealm.app, fitrealmgame.com, etc.)
+- Social media handle availability (@fitrealm)
+
+#### Age Rating
+- Target: **12+** (iOS) / **Everyone 10+** (Android)
+- Multiplayer interaction is structured (no free-text messaging), which avoids a higher rating
+- No violence, gambling, or mature content
+- Health/fitness data access requires disclosure in App Store review
+
+#### App Store Review Considerations
+- **HealthKit usage**: Apple requires a clear description of why health data is accessed. Description: "FitRealm reads workout data (distance, duration) to convert your real-world movement into in-game resources."
+- **Location usage**: Must explain background location access if used. Phase 0: foreground only = simpler review. Phase 2: background = needs strong justification string.
+- **IAP**: All gem packs and Supporter Pack must use Apple/Google IAP — no external payment links.
+- **Subscription**: Realm Pass must follow App Store subscription guidelines (free trial option, easy cancellation, restore purchases button).
+
+#### Beta Testing Plan
+- **Phase 0 beta**: TestFlight (iOS) + Google Play Internal Testing (Android). 10–20 friends/family testers.
+- **Phase 1 beta**: Expand to 50–100 testers via TestFlight public link + Play Store closed testing track.
+- **Soft launch**: Consider launching in a single smaller market (e.g. Canada, Australia) before worldwide release to catch issues at scale.
+- Feedback collection: in-app feedback button (Phase 1) → sends to a Supabase `feedback` table or a simple Google Form.
+
+---
+
+## Audio Design
+
+Sound and music are Phase 2 polish — the app ships silent in Phase 0/1 with only system notification sounds. But the audio direction is defined here so it's consistent when added.
+
+#### Audio Philosophy
+FitRealm's audio should feel like a cozy medieval world — warm, ambient, never intrusive. Players will often use the app while listening to their own music or podcasts during movement, so game audio must never fight for attention.
+
+#### Sound Effects (Phase 2)
+| Event | Sound | Notes |
+|---|---|---|
+| Allocation confirmed | Soft coin/resource gathering chime | Short, satisfying, like a chest opening |
+| Building constructed | Hammer + wood construction sound | Brief, celebratory |
+| Building upgraded | Deeper construction + fanfare | Slightly grander than Lv 1 |
+| Achievement unlocked | Brass horn flourish | Distinct, rewarding, Zelda-chest-open energy |
+| Rally received | Soft shield tap + crowd murmur | Subtle — shouldn't interrupt anything |
+| Streak milestone | Rising tone sequence | Gets more elaborate at higher milestones |
+| Random quest appeared | Scroll unfurling + light bell | Attention-getting but not alarming |
+| Hex tile revealed | Shimmer/sparkle sweep | Satisfying scratch-off feel |
+| Rare spawn discovered | Magical chime + glow sound | Special, immediately recognizable |
+| Village entering Ruined state | Low ambient wind + distant bell | Somber but hopeful, not punishing |
+| Comeback quest completed | Full orchestral swell (short) | Heroic, triumphant |
+
+#### Background Music (Phase 2)
+- Village scene: gentle medieval lute/flute ambient loop (~2 min, seamless loop)
+- World map: slightly more adventurous ambient — light percussion + strings
+- Movement tracker: NO music by default (player is likely listening to their own). Optional toggle.
+- Music volume independent of SFX volume
+- Master mute toggle respects device silent mode
+
+#### Audio Implementation
+- Use `expo-av` or `react-native-sound` for SFX
+- All audio files bundled with the app (small MP3s, <100KB each)
+- Global audio settings in Profile → Settings: Master Volume, SFX Volume, Music Volume, Music On/Off
+- Respect device silent/vibrate mode — never play audio when phone is silenced
+
+---
+
+## Key Constraints & Notes
+
+- **Location privacy & player safety**:
+  - **Village location ≠ real location. This is a core privacy principle, not a footnote.** Players freely choose where to place their village on Earth. A village in Tokyo could belong to someone in Minnesota. The game never asks for, stores, or infers the player's real-world home address. Real GPS is only used transiently during active outdoor runs and is never linked to village placement.
+  - Because village placement is free-choice, sharing your village location with faction members or the public reveals NOTHING about where you physically live. This is privacy-by-design — the system cannot leak real location data because it never has it.
+  - **Village visibility settings** (player controls):
+    - "Faction only" (default): only faction members see your village on the map
+    - "Everyone": any player can see your village marker
+    - "Hidden": your village does not appear on any shared map view
+  - **Location fuzzing**: when village locations ARE visible, fuzz the displayed coordinate by ±0.5 miles randomly. Never show exact placement to other players.
+  - **Block system**: any player can block another player. Blocked users cannot see your village, send you challenge invites, or appear in your map view. Blocking is silent (the blocked user is not notified).
+  - **Report system**: players can report inappropriate usernames, village names, or faction names. Reports go to a moderation queue (manual review in Phase 1, automated flagging in Phase 2).
+  - **Minor safety**: no direct messaging between players in Phase 1. All social interaction is through structured mechanics (Rallies, faction feed events, challenges). This prevents harassment vectors.
+  - **Data deletion**: players can delete their account from Settings. This permanently removes all personal data, village data, and activity history from Supabase within 30 days (GDPR/CCPA compliant).
+- **Offline-first design**: The app must be usable without internet for core activities:
+
+  **Fully offline (SQLite cached):**
+  - Movement tracker: GPS tracking, distance calculation, route recording — all local. Syncs to Supabase on reconnect.
+  - Village view: cached resource levels, building states, streak count. Shows "last synced" timestamp if stale.
+  - Allocate miles: offline allocations queue locally and sync when connected. Resource meters update optimistically on-device.
+  - Village Chronicle: readable offline from cache.
+  - Avatar: rendered locally from bundled SVG layers.
+
+  **Requires internet:**
+  - Faction feed (real-time Supabase subscription)
+  - World map with Mapbox tiles (Mapbox caches recently viewed tiles, but new areas need connectivity)
+  - Gem purchases (IAP requires App Store connection)
+  - Faction quest contributions
+  - Rally system
+  - World Events
+
+  **Sync strategy:**
+  - On app open with connectivity: pull latest village state, streak status, faction data from Supabase
+  - On reconnect after offline session: push queued movements, allocations, and chronicle entries
+  - Conflict resolution: server state wins for resources (prevents offline cheating). Movements are additive (never lost).
+  - Show a subtle "Offline mode" indicator in the header when disconnected — not a blocking modal.
+- **GPS accuracy**: Kalman filter on incoming GPS points. Discard points with accuracy >20m. Calculate distance using Haversine formula on filtered points.
+- **Units**: Store everything internally in miles (adjusted by multiplier). Display in user's preferred unit (miles or km).
+- **Movement inclusivity**: Walking must always feel rewarding.
+- **Localization**: English only for Phase 0/1. But design for localization from the start:
+  - All user-facing strings in a single `i18n/en.json` file (use `react-native-i18n` or `i18next`)
+  - Quest templates use variable interpolation, not string concatenation (localizable by design)
+  - Avoid hardcoded text in SVG assets or images
+  - Number/distance formatting: use `Intl.NumberFormat` for locale-aware display
+  - RTL support: not needed for Phase 0/1 but avoid CSS that breaks RTL (no absolute left/right positioning for layout) Never design UI, copy, or notifications that imply running is the "real" activity. Any movement is a win.
+- **Decay is server-only**: Vercel Cron runs every 6 hours. Never trust client-side decay calculations.
+- **Error states & edge cases**:
+  - GPS fails mid-session: save all recorded points so far, show "GPS signal lost" banner, continue timer, resume recording when signal returns. Partial sessions are still valid — credit the distance recorded.
+  - Supabase down: app continues in offline mode (SQLite cache). Queue all writes. Show "Offline mode" indicator. Retry sync every 60 seconds.
+  - Player allocates more miles than available: UI greys out options that cost more than current bank balance. Server-side validation as backup — reject and return error.
+  - Faction quest deadline at 99%: quest fails. Faction event posted: "So close! The quest fell short by X miles." No partial rewards (clean incentive to finish). New quest generates next week.
+  - Duplicate faction names: enforce unique faction names in DB (`unique` constraint). UI shows "Name taken, try another" immediately.
+  - Simultaneous allocations: use Supabase transactions to atomically deduct miles and add resources. Prevent race conditions where two quick taps double-spend.
+  - App killed during movement: on next app open, detect incomplete session in SQLite (started_at set, ended_at null). Prompt: "You had an unfinished session — save 1.3 miles recorded?" Yes → bank the miles. No → discard..
+- **Grace period**: `grace_period_ends_at = created_at + 24 hours`. Lambda checks this before applying decay.
+- **Supabase RLS**: Enable Row Level Security on all tables. Users can only read/write their own villages, activities, and allocations. Faction data is readable by faction members only.
+- **Accessibility (non-negotiable):**
+  - Dark mode support (respect system setting + in-app toggle)
+  - Colorblind-friendly resource meters: use icons + labels alongside colors, never color-only indicators. Food = apple icon, Medicine = cross icon, Wood = tree icon, Morale = heart icon, Stone = gem icon
+  - VoiceOver / TalkBack screen reader support on all interactive elements (proper accessibility labels on buttons, meters, map markers)
+  - Reduced motion option: disables hex reveal animations, village celebration animations, and particle effects. Toast notifications and state changes still occur, just without animation
+  - Minimum touch target size: 44x44pt on all interactive elements (Apple HIG standard)
+  - Text scaling: support Dynamic Type (iOS) and font scaling (Android) up to 200%
+  - High contrast mode option for resource meters and map overlays
+- **Secrets**: Store all credentials (Supabase URL/key, Mapbox access token) in Vercel environment variables (project settings). Never commit to repo.
+- **Monetization ethics**: Never sell resources (Food/Medicine/Wood/Stone) directly for money. Never sell miles or movement credit. Never gate content behind a paywall. The game must be fully playable for free — paying is convenience and support, never power.
+- **Miles are sacred**: Miles can ONLY be earned through physical movement.
+- **Data migration & economy rebalancing**: All game balance values (decay rates, gem costs, building outputs, allocation costs) are stored in a `game_config` table in Supabase, not hardcoded. When rebalancing:
+  - Gem balance changes: never retroactively remove earned gems. If prices increase, grandfather existing purchases. If prices decrease, give no retroactive refund (standard practice).
+  - Decay rate changes: apply immediately to all villages on next cron tick.
+  - Building output changes: apply immediately. If nerfed, post an in-app notice explaining why.
+  - Always communicate balance changes to players via an in-app changelog or notification.
+- **Supabase backups**: Enable Supabase's built-in daily backups (available on Pro plan). For free tier, run a weekly pg_dump via Vercel Cron to Supabase Storage as a backup.
+- **Data export**: Players can request a full data export from Settings (GDPR right to data portability). Export as JSON: profile, village, activity history, achievements, chronicle. No feature, purchase, subscription, or game mechanic should ever generate miles without real movement. Miles are the proof-of-work that powers the entire economy.
+- **Notification restraint**: Max 3 push notifications per day, enforced server-side. Priority system when multiple notifications compete for the same slot:
+
+  **Priority 1 (always sent):** Resource critical — any resource below 15 ("Your village is starving! Food is dangerously low.")
+  **Priority 2:** Streak at risk — player hasn't moved today and streak will break at midnight ("Your 14-day streak needs you! Any movement counts.")
+  **Priority 3:** Random quest event — new quest available ("A wolf pack was spotted! Hunt them for +30 Food.")
+  **Priority 4:** Evening faction digest — daily summary at ~7:30 PM local ("Your faction logged 18 miles today!")
+  **Priority 5 (lowest):** World event reminders, achievement nudges, Rest Day available
+
+  If 3 notifications have already been sent today, lower-priority ones are queued for tomorrow or suppressed entirely. Comeback notifications: max 2 total (Day 3 + Day 7), then permanent silence. Never spam a lapsed user.
+- **Legal requirements (before App Store submission)**:
+  - **Privacy Policy**: required. Must disclose: location data usage (foreground GPS during movement), HealthKit/Health Connect data access, Supabase data storage, analytics event logging. Host at fitrealm.app/privacy or similar.
+  - **Terms of Service**: required. Cover: account deletion, virtual currency (gems are non-refundable), user conduct in factions, content ownership.
+  - **COPPA**: if allowing users under 13, need parental consent mechanism. Simpler option: set minimum age to 13 in Terms of Service and App Store age rating. Recommended for Phase 1.
+  - **Health disclaimers**: "FitRealm is not a medical device. Consult a physician before starting any exercise program." Display during onboarding and in Settings → About.
+  - **IAP compliance**: gems and Supporter Pack must clearly state "virtual items have no real-world value" and "subscriptions auto-renew" per App Store guidelines.
+- **Onboarding is sacred**: The first session must complete the full core loop (move → allocate → village improves) in under 5 minutes. Never front-load text tutorials. Teach by doing.
