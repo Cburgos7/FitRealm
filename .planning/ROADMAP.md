@@ -33,7 +33,7 @@
 
 **Requirements:**
 - AUTH-01, AUTH-02, AUTH-03
-- INFRA-05, INFRA-06
+- INFRA-01, INFRA-05, INFRA-06
 
 **Success Criteria:**
 1. App builds and runs on both iOS Simulator and Android Emulator with no errors
@@ -43,9 +43,9 @@
 5. Vercel Express API deployed and reachable from the mobile app
 
 **Plans (3):**
-- Plan A: RN scaffold + TypeScript + ESLint + Prettier; verify both platform builds
-- Plan B: Supabase project setup (profiles, villages, activities, allocations tables + RLS) + Auth (Google + Apple)
-- Plan C: Vercel project scaffolded with empty Express API + RevenueCat SDK integrated early
+- [ ] 01-A-PLAN.md — Monorepo scaffold + Expo SDK 52 bare app + 4-tab shell + auth routing skeleton + test infra
+- [ ] 01-B-PLAN.md — Supabase schema (profiles, villages, RLS) + Google Sign-In + Apple Sign-In + session persistence
+- [ ] 01-C-PLAN.md — Vercel Express API (GET /health) + RevenueCat SDK init + full Walking Skeleton verification
 
 ---
 
