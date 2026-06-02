@@ -1,6 +1,9 @@
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { Redirect } from 'expo-router';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { useAuthStore } from '@/store/useAuthStore';
+import { supabase } from '@/lib/supabase';
 
 export default function SignIn() {
   const session = useAuthStore((s) => s.session);
@@ -9,24 +12,63 @@ export default function SignIn() {
     return <Redirect href="/(tabs)/village" />;
   }
 
-  const signInWithGoogle = () => {
-    console.log('Google sign-in not yet configured');
-  };
-
-  const signInWithApple = () => {
-    console.log('Apple sign-in not yet configured');
+  const signInWithGoogle = async () => {
+    try {
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      if (response.data?.idToken) {
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: response.data.idToken,
+        });
+        if (error) Alert.alert('Sign in error', error.message);
+      }
+    } catch (error: unknown) {
+      const err = error as { code?: string; message?: string };
+      if (err.code !== 'SIGN_IN_CANCELLED') {
+        console.error('Google sign-in error:', err.message);
+      }
+    }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>FitRealm</Text>
-      <TouchableOpacity style={styles.button} onPress={signInWithGoogle}>
+      <Text style={styles.subtitle}>Move. Bank. Survive.</Text>
+
+      <TouchableOpacity style={styles.googleButton} onPress={signInWithGoogle}>
         <Text style={styles.buttonText}>Sign in with Google</Text>
       </TouchableOpacity>
+
       {Platform.OS === 'ios' && (
-        <TouchableOpacity style={[styles.button, styles.appleButton]} onPress={signInWithApple}>
-          <Text style={styles.buttonText}>Sign in with Apple</Text>
-        </TouchableOpacity>
+        <AppleAuthentication.AppleAuthenticationButton
+          buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+          cornerRadius={8}
+          style={styles.appleButton}
+          onPress={async () => {
+            try {
+              const credential = await AppleAuthentication.signInAsync({
+                requestedScopes: [
+                  AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                  AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                ],
+              });
+              if (credential.identityToken) {
+                const { error } = await supabase.auth.signInWithIdToken({
+                  provider: 'apple',
+                  token: credential.identityToken,
+                });
+                if (error) Alert.alert('Sign in error', error.message);
+              }
+            } catch (error: unknown) {
+              const err = error as { code?: string };
+              if (err.code !== 'ERR_REQUEST_CANCELED') {
+                console.error('Apple sign-in error:', err);
+              }
+            }
+          }}
+        />
       )}
     </View>
   );
@@ -38,13 +80,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+    backgroundColor: '#0f0f0f',
   },
   title: {
-    fontSize: 36,
+    fontSize: 42,
     fontWeight: 'bold',
-    marginBottom: 48,
+    color: '#fff',
+    marginBottom: 8,
   },
-  button: {
+  subtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 56,
+  },
+  googleButton: {
     backgroundColor: '#4285F4',
     paddingVertical: 14,
     paddingHorizontal: 32,
@@ -54,7 +103,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appleButton: {
-    backgroundColor: '#000000',
+    width: '100%',
+    height: 50,
   },
   buttonText: {
     color: '#fff',
