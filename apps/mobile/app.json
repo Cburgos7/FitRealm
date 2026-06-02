@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "FitRealm",
+    "slug": "fitrealm",
+    "version": "1.0.0",
+    "scheme": "fitrealm",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "bundleIdentifier": "com.fitrealm.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.fitrealm.app",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-apple-authentication"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

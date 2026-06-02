@@ -1,0 +1,7 @@
+{
+  "name": "fitrealm",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}
