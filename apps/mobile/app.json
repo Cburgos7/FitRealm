@@ -26,13 +26,25 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["@react-native-google-signin/google-signin", {
-        "iosUrlScheme": "com.googleusercontent.apps.617321571117-4b3c5sfr23ac6jbc319u5ftkkggq6urb"
-      }],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.617321571117-4b3c5sfr23ac6jbc319u5ftkkggq6urb"
+        }
+      ],
       "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "1f7ed172-4901-46d8-a68f-408821a79401"
+      }
+    },
+    "owner": "opxrz"
   }
 }
