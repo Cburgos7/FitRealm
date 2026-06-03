@@ -403,10 +403,11 @@ Call `useAuthStore.getState().initialize()` in the root `_layout.tsx` `useEffect
 ```tsx
 // Source: supabase.com/docs/guides/getting-started/quickstarts/expo-react-native
 // File: apps/mobile/lib/supabase.ts
+// IMPORTANT: Import order matters — localStorage polyfill MUST be installed before createClient is called
 
 import 'react-native-url-polyfill/auto'
+import 'expo-sqlite/localStorage/install'  // MUST come before createClient import
 import { createClient } from '@supabase/supabase-js'
-import 'expo-sqlite/localStorage/install'
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
@@ -1039,22 +1040,16 @@ const { data } = useQuery({
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Google Cloud Console project: create new or use Firebase?**
-   - What we know: `@react-native-google-signin/google-signin` can use either Firebase config files or a standalone Google Cloud OAuth client.
-   - What's unclear: The user hasn't indicated whether a Firebase project exists or is preferred.
-   - Recommendation: Create a standalone Google Cloud Console project (no Firebase). Get `google-services.json` and `GoogleService-Info.plist` directly from Google Cloud Console → APIs & Services → Credentials. This avoids Firebase dependency when Supabase is the backend.
+1. **RESOLVED: Google Cloud Console project: create new or use Firebase?**
+   - Create a standalone Google Cloud Console project (no Firebase). Get `google-services.json` and `GoogleService-Info.plist` directly from Google Cloud Console → APIs & Services → Credentials. This avoids Firebase dependency when Supabase is the backend.
 
-2. **Supabase project: hosted (dashboard) or needs to be created?**
-   - What we know: The project uses Supabase hosted. The research assumes the user creates a project at supabase.com.
-   - What's unclear: Whether the project already exists or needs to be created.
-   - Recommendation: Plan B (Supabase setup) should include a step to create the project via dashboard and copy the URL/anon key to `.env`.
+2. **RESOLVED: Supabase project: hosted (dashboard) or needs to be created?**
+   - Plan B (Supabase setup) includes a step to create the project via dashboard at supabase.com and copy the project URL + anon key to `.env`.
 
-3. **Vercel project: personal account or team?**
-   - What we know: Vercel free tier is sufficient for Phase 1 (`GET /health` only).
-   - What's unclear: Whether a Vercel account already exists.
-   - Recommendation: Plan C should include `vercel link` to bind the `apps/api/` directory to a Vercel project.
+3. **RESOLVED: Vercel project: personal account or team?**
+   - Plan C includes `vercel link` to bind `apps/api/` to a Vercel project. Free tier is sufficient for Phase 1 (`GET /health` only).
 
 ---
 

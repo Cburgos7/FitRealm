@@ -15,6 +15,9 @@ apps/mobile/ios/
 # Vercel
 apps/api/.vercel/
 
+# Supabase CLI temp
+supabase/.temp/
+
 # Native signing artifacts
 *.keystore
 *.p8
