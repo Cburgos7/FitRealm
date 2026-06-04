@@ -1,14 +1,17 @@
 /**
- * move/index.tsx — Move hub (MOV-01, MOV-07, MOV-08, D2-14, D2-15)
+ * move/index.tsx — Move hub (MOV-01, MOV-07, MOV-08, MOV-09, D2-14, D2-15)
  *
  * Features:
  *   - Start GPS Session button → navigates to tracker.tsx
  *   - Manual Entry form (distance + duration → POST /activity/manual)
  *   - Orphan recovery on mount: if a pending_session checkpoint exists,
  *     silently bank partial miles and show a toast (MOV-07/D2-14)
+ *   - Passive health read + gap-fill on first Move-tab visit (MOV-09, D2-10):
+ *     requests HealthKit (iOS) / Health Connect (Android) permission, computes
+ *     delta via gap-fill, surfaces PassiveBankPrompt when delta > 0 (D2-15)
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,11 +28,28 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useGpsSession } from '@/hooks/useGpsSession';
+import { usePassiveHealth } from '@/hooks/usePassiveHealth';
+import { PassiveBankPrompt } from '@/components/move/PassiveBankPrompt';
 import { supabase } from '@/lib/supabase';
 
 export default function MoveScreen() {
   const insets = useSafeAreaInsets();
   const { recoverOrphanSession } = useGpsSession();
+
+  // Passive health hook — permission + gap-fill + bank prompt (MOV-09 / D2-10 / D2-15)
+  const {
+    showPrompt,
+    promptDelta,
+    healthUnavailable,
+    unavailableReason,
+    bankLoading,
+    requestAndRead,
+    confirmBank,
+    dismissPrompt,
+  } = usePassiveHealth();
+
+  // Track whether we've already triggered the first-visit health read this session
+  const healthReadDoneRef = useRef(false);
 
   // Manual entry form state
   const [distanceInput, setDistanceInput] = useState('');
@@ -52,6 +72,26 @@ export default function MoveScreen() {
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // First Move-tab visit: request Health permission + read passive distance (D2-10 / MOV-09)
+  // We only fire this once per component mount (i.e., first time the Move tab is focused).
+  useEffect(() => {
+    if (healthReadDoneRef.current) return;
+    healthReadDoneRef.current = true;
+    requestAndRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Surface a notice when health is unavailable (Pitfall 8 — graceful degradation)
+  useEffect(() => {
+    if (healthUnavailable && unavailableReason) {
+      Alert.alert(
+        'Passive Sync Unavailable',
+        unavailableReason,
+        [{ text: 'OK', style: 'default' }],
+      );
+    }
+  }, [healthUnavailable, unavailableReason]);
 
   // ---------- Manual entry ----------
 
@@ -109,6 +149,15 @@ export default function MoveScreen() {
       style={{ flex: 1 } as const}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {/* Passive bank prompt — shown after gap-fill finds uncredited miles (D2-15 / MOV-09) */}
+      {showPrompt && (
+        <PassiveBankPrompt
+          deltaMiles={promptDelta}
+          onConfirm={confirmBank}
+          onDismiss={dismissPrompt}
+          loading={bankLoading}
+        />
+      )}
       <ScrollView
         contentContainerStyle={[
           styles.container,
