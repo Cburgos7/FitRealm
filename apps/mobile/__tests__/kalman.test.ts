@@ -14,6 +14,19 @@ const DEFAULT_CONFIG = {
   R: 0.0001,
 };
 
+// Deterministic PRNG (mulberry32) so noise sequences are reproducible —
+// avoids intermittent failures from Math.random() against tight thresholds.
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 describe('KalmanFilter — MOV-02', () => {
   it('smooths a noisy constant signal toward the true value', () => {
     const filter = new KalmanFilter(DEFAULT_CONFIG);
@@ -22,8 +35,9 @@ describe('KalmanFilter — MOV-02', () => {
     // Seed with the true value
     filter.reset(TRUE_VALUE);
 
-    // Feed 50 noisy measurements (±0.01 noise)
-    const noisy = Array.from({ length: 50 }, () => TRUE_VALUE + (Math.random() - 0.5) * 0.02);
+    // Feed 50 noisy measurements (±0.01 noise) — deterministic seed
+    const rand = seededRandom(12345);
+    const noisy = Array.from({ length: 50 }, () => TRUE_VALUE + (rand() - 0.5) * 0.02);
     let estimate = TRUE_VALUE;
     for (const m of noisy) {
       estimate = filter.filter(m);
@@ -38,7 +52,8 @@ describe('KalmanFilter — MOV-02', () => {
     const TRUE_VALUE = 0.0;
     filter.reset(TRUE_VALUE);
 
-    const measurements = Array.from({ length: 100 }, () => TRUE_VALUE + (Math.random() - 0.5) * 0.1);
+    const rand = seededRandom(67890);
+    const measurements = Array.from({ length: 100 }, () => TRUE_VALUE + (rand() - 0.5) * 0.1);
     const filtered = measurements.map(m => filter.filter(m));
 
     const inputVariance = variance(measurements);
