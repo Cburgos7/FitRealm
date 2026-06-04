@@ -5,5 +5,9 @@ module.exports = {
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    // Ensure workspace-hoisted packages (zustand, etc.) resolve react from the
+    // mobile workspace's own node_modules, not the monorepo root (#react-resolution)
+    '^react$': '<rootDir>/node_modules/react',
+    '^react/(.*)$': '<rootDir>/node_modules/react/$1',
   },
 };
