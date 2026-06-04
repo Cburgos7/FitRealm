@@ -46,7 +46,7 @@ created: 2026-06-03
 | MOV-08 | Manual entry anti-cheat: impossible pace rejected; daily cap enforced | unit (API) | `cd apps/api && npm test -- --testPathPattern=activity` | ❌ W0 |
 | ALLOC-04 | SQLite queue enqueues, dequeues, handles rejection | unit | `cd apps/mobile && npm test -- --testPathPattern=sqliteQueue` | ❌ W0 |
 | ALLOC-05 | `allocate_food` RPC is atomic (concurrent calls don't over-spend) | integration | manual Supabase SQL test | ❌ W0 |
-| INFRA-02 | game_config seeded with all required keys | smoke | `cd apps/api && npm test -- --testPathPattern=gameConfig` | ❌ W0 |
+| INFRA-02 | game_config seeded with all required keys | migration assertion | Plan A Task 1 acceptance: grep confirms game_config seed count ≥ 18 keys + Task 2 manual SQL check | covered by migration |
 | E2E core loop | Move → Bank → Allocate → food increases | manual (device) | n/a — physical device | manual-only |
 | E2E decay | 6h pg_cron tick reduces food; starving locks allocation | manual (trigger in Supabase) | n/a | manual-only |
 

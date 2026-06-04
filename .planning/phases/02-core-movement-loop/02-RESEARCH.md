@@ -1054,22 +1054,20 @@ ON CONFLICT (key) DO NOTHING;
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **react-native-health New Architecture compatibility**
+1. **react-native-health New Architecture compatibility** — **RESOLVED**
    - What we know: v1.19.0 was released Oct 2024; the library is Objective-C based; SDK 52 enables New Architecture by default; bridge modules usually still work via compatibility layer in RN 0.76
    - What's unclear: Whether any specific HealthKit query method crashes or silently fails under Fabric rendering
-   - Recommendation: Make Plan C's Wave 0 include an explicit "HealthKit smoke test" task on physical iPhone before proceeding to implementation
+   - **Resolution:** Plan C (02-03) Task 0 is a front-loaded blocking physical-iPhone HealthKit smoke test executed BEFORE any iOS passive-sync implementation. If it fails, passive-iOS is gated and the fallback (defer iOS passive sync, ship Android-only passive + manual entry) is taken — documented in 02-03-PLAN.md. This is Assumption A1 and is treated as a Wave-0 risk gate, not an open question.
 
-2. **Food decay: Vercel endpoint as fallback vs. pure pg_cron**
-   - What we know: pg_cron is the right tool, but the Plan E Vercel endpoint could still expose a `/api/cron/decay` for manual triggering (admin tool) or future migration to Vercel Pro
-   - What's unclear: Whether keeping a dormant Vercel decay endpoint is worth the maintenance overhead
-   - Recommendation: Build pg_cron only; skip the Vercel decay endpoint in Phase 2; it can be added later if needed
+2. **Food decay: Vercel endpoint as fallback vs. pure pg_cron** — **RESOLVED**
+   - What we know: pg_cron is the right tool, but a Vercel endpoint could still expose `/api/cron/decay` for manual triggering or future migration to Vercel Pro
+   - **Resolution:** pg_cron ONLY in Phase 2. No Vercel decay endpoint is built. Manual decay triggering for testing is done via SQL in the Supabase dashboard. A Vercel endpoint can be added later if a migration to Vercel Pro ever happens. Plan E (02-05) builds the Postgres function + `cron.schedule` only.
 
-3. **app.config.js plugin ordering — expo-build-properties and minSdkVersion**
-   - What we know: expo-build-properties must be listed after other plugins that also modify android build settings to avoid conflicts
-   - What's unclear: Phase 1 did not use expo-build-properties; we don't know what the current minSdkVersion is
-   - Recommendation: Check `apps/mobile/android/build.gradle` (if it exists post-prebuild) or set minSdkVersion in expo-build-properties explicitly
+3. **app.config.js plugin ordering — expo-build-properties and minSdkVersion** — **RESOLVED**
+   - What we know: expo-build-properties must be listed after other plugins that also modify android build settings; Health Connect requires Android minSdk 26 / targetSdk 35
+   - **Resolution:** Set `minSdkVersion: 26` and `targetSdkVersion: 35` explicitly via `expo-build-properties` in the app.config.js plugins array (listed after the health/Mapbox plugins). Plan A (02-01) Task 1 must verify the current Phase-1 `android.minSdkVersion` during the config-plugin setup and document the before/after in 02-01-SUMMARY.md. If Phase 1 already set a value ≥26, no downgrade is needed.
 
 ---
 
@@ -1123,7 +1121,7 @@ ON CONFLICT (key) DO NOTHING;
 | MOV-08 | Manual entry anti-cheat: pace > max rejected; daily cap enforced | unit (API) | `cd apps/api && npm test -- --testPathPattern=activity` | ❌ Wave 0 |
 | ALLOC-04 | SQLite queue enqueues, dequeues, handles rejection | unit | `cd apps/mobile && npm test -- --testPathPattern=sqliteQueue` | ❌ Wave 0 |
 | ALLOC-05 | allocate_food RPC is atomic (concurrent calls don't over-spend) | integration | manual Supabase SQL test | ❌ Wave 0 |
-| INFRA-02 | game_config seeded with all required keys | smoke | `cd apps/api && npm test -- --testPathPattern=gameConfig` | ❌ Wave 0 |
+| INFRA-02 | game_config seeded with all required keys | migration assertion | Plan A Task 1 acceptance: grep confirms game_config seed count ≥ 18 keys + Task 2 manual SQL | covered by migration |
 | E2E: core loop | Move → Bank → Allocate → village food increases | manual (physical device) | `n/a — manual test on device` | manual-only |
 | E2E: decay | 6h pg_cron tick reduces food; starving state locks alloc | manual (trigger cron manually in Supabase dashboard) | n/a | manual-only |
 
