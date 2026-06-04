@@ -4,9 +4,10 @@
  * Composes:
  *   • VillageScene (background illustration per food_state)
  *   • Top overlay bar: FoodMeter + Mile Bank + non-decaying resource counts
- *     (medicine / wood / stone / morale)
+ *     (medicine / wood / stone / morale) + PendingBadge on Miles chip
  *   • "Protected" grace badge when grace period is active (D2-25)
- *   • Bottom-right FAB placeholder — Plan D wires the allocation bottom sheet
+ *   • AllocateFab (bottom-right) — opens the AllocateSheet (Plan D / ALLOC-01)
+ *   • useSyncQueue — drains SQLite outbox on reconnect (ALLOC-04)
  *
  * Balance values (food_cap, food_hungry_threshold) come from useGameConfig,
  * not hardcoded — INFRA-02 / D2-26.
@@ -15,25 +16,60 @@
  * Decay is server-only; this screen NEVER subtracts food client-side (CLAUDE.md).
  */
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as SQLite from 'expo-sqlite';
 import { VillageScene } from '@/components/village/VillageScene';
 import { FoodMeter } from '@/components/village/FoodMeter';
+import { AllocateFab } from '@/components/village/AllocateFab';
+import { PendingBadge } from '@/components/village/PendingBadge';
 import { useVillage } from '@/hooks/useVillage';
 import { useGameConfig } from '@/hooks/useGameConfig';
+import { useSyncQueue } from '@/hooks/useSyncQueue';
+import { useGameStore } from '@/store/useGameStore';
 import { foodToState } from '@/lib/villageState';
+import { initQueue, getPendingCount } from '@/lib/sqliteQueue';
 
 export default function VillageScreen() {
   const insets = useSafeAreaInsets();
   const { data: village, isLoading, isError } = useVillage();
   const { data: config } = useGameConfig();
+  const setPendingAllocations = useGameStore((s) => s.setPendingAllocations);
+
+  // SQLite DB ref — opened once on mount, shared with AllocateFab and useSyncQueue
+  const [db, setDb] = useState<SQLite.SQLiteDatabase | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    initQueue().then((opened) => {
+      if (!cancelled) {
+        setDb(opened);
+        // Restore the pending badge count from queue on mount (app restart)
+        getPendingCount(opened).then((count) => {
+          if (!cancelled) setPendingAllocations(count);
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [setPendingAllocations]);
+
+  // Wire up sync-on-reconnect (drains SQLite outbox when device goes online)
+  useSyncQueue({
+    db,
+    onRejected: (count) => {
+      Alert.alert(
+        'Allocation rejected',
+        `${count} offline allocation${count > 1 ? 's were' : ' was'} rejected by the server — you may not have had enough miles. Your village state has been updated.`
+      );
+    },
+  });
 
   // Read balance thresholds from game_config (INFRA-02); fall back to seeded defaults
   const foodCap = Number(config?.['food_cap'] ?? 100);
@@ -88,30 +124,39 @@ export default function VillageScreen() {
 
           {/* Resource counts row */}
           <View style={styles.resourceRow}>
-            {/* Mile Bank (VLG-02) */}
-            <ResourceChip icon="⚡" label="Miles" value={formatNum(village.milesBanked)} />
+            {/* Mile Bank (VLG-02) — with PendingBadge overlay for offline queue */}
+            <View style={styles.chipWrapper}>
+              <ResourceChip icon="⚡" label="Miles" value={formatNum(village.milesBanked)} />
+              <PendingBadge />
+            </View>
             {/* Non-decaying counts (VLG-01) */}
-            <ResourceChip icon="💊" label="Med"   value={formatNum(village.medicine)} />
-            <ResourceChip icon="🪵" label="Wood"  value={formatNum(village.wood)} />
-            <ResourceChip icon="🪨" label="Stone" value={formatNum(village.stone)} />
+            <ResourceChip icon="💊" label="Med"    value={formatNum(village.medicine)} />
+            <ResourceChip icon="🪵" label="Wood"   value={formatNum(village.wood)} />
+            <ResourceChip icon="🪨" label="Stone"  value={formatNum(village.stone)} />
             <ResourceChip icon="🎵" label="Morale" value={formatNum(village.morale)} />
           </View>
         </View>
       </View>
 
-      {/* Bottom-right FAB — placeholder hook point for Plan D's allocation sheet */}
-      <View style={[styles.fabContainer, { paddingBottom: insets.bottom }]} pointerEvents="box-none">
-        <TouchableOpacity
-          style={styles.fab}
-          accessibilityLabel="Allocate miles"
-          accessibilityHint="Opens the allocation screen to spend miles on your village"
-          onPress={() => {
-            // TODO (Plan D): open allocation bottom sheet
-          }}
-        >
-          <Text style={styles.fabIcon}>⚔️</Text>
-        </TouchableOpacity>
-      </View>
+      {/* AllocateFab — opens the allocation bottom sheet (ALLOC-01 / D2-32) */}
+      <AllocateFab
+        db={db}
+        onAllocationSuccess={(foodGain) => {
+          // Warm high-fantasy toast (D2-41)
+          // Using Alert as a simple cross-platform notification; a toast library
+          // (e.g. react-native-toast-message) can be wired here in a later pass.
+          Alert.alert(
+            'Your hunters return!',
+            `A bountiful catch — +${foodGain} Food added to ${village.name}!`
+          );
+        }}
+        onInsufficientMiles={() => {
+          Alert.alert(
+            'Not enough miles',
+            "Your hunters returned empty-handed — you don't have enough miles for this hunt."
+          );
+        }}
+      />
     </View>
   );
 }
@@ -219,6 +264,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  chipWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
   chip: {
     alignItems: 'center',
     flex: 1,
@@ -237,29 +286,5 @@ const styles = StyleSheet.create({
     color: '#e0cfa9',
     fontSize: 13,
     fontWeight: '600',
-  },
-
-  // FAB
-  fabContainer: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-  },
-  fab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#7b5e2a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    margin: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  fabIcon: {
-    fontSize: 24,
   },
 });
