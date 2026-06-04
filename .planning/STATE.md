@@ -49,8 +49,19 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 - 2026-05-24: Project initialized. PROJECT.md, config.json, REQUIREMENTS.md, ROADMAP.md created.
 - 2026-06-02: Phase 1 Plans A/B/C executed. All code written, 8/8 tests pass. Device verification deferred.
-- 2026-06-03: Phase 1 credentials wired (Supabase/Google/Vercel/RevenueCat live). Phase 2 context gathered — **core mechanic redesigned to food-only survival model** (REQUIREMENTS.md + ROADMAP.md updated). CONTEXT.md ready for planning.
+- 2026-06-03: Phase 1 credentials wired (Supabase/Google/Vercel/RevenueCat live). Phase 2 context gathered — **core mechanic redesigned to food-only survival model** (REQUIREMENTS.md + ROADMAP.md updated).
+- 2026-06-03: Phase 2 PLANNED — research + 5 plans (3 waves) + validation strategy. Verified PASSED (plan-checker caught + fixed a day_credits double-counting contract). Key finding: food decay runs on Supabase pg_cron, not Vercel Cron (Hobby plan caps cron at once/day).
+
+## Phase 2 Plan Status
+
+| Plan | Wave | Description | Status |
+|------|------|-------------|--------|
+| 02-01 | 1 | Schema + native packages + Village view + Wave-0 tests | ☐ Not executed |
+| 02-02 | 2 | Active GPS tracker + manual anti-cheat API | ☐ Not executed |
+| 02-03 | 3 | Passive HealthKit/Health Connect + gap-fill | ☐ Not executed |
+| 02-04 | 2 | Allocate Miles + offline SQLite queue | ☐ Not executed |
+| 02-05 | 3 | Food decay via Supabase pg_cron | ☐ Not executed |
 
 ## Next Action
 
-Plan Phase 2: `/gsd-plan-phase 2`. (Phase 1 Android device smoke test still optionally pending on desktop.)
+Execute Phase 2: `/gsd-execute-phase 2`. (Phase 1 Android device smoke test still optionally pending on desktop.)
