@@ -75,7 +75,7 @@
 - Plan B: Active GPS tracker (Mapbox live map, Kalman filter, auto activity detection, GeoJSON to Storage) + manual entry with anti-cheat
 - Plan C: Passive movement (HealthKit/Health Connect steps+workouts, gap-fill reconciliation, app-open banking prompt, permissions)
 - Plan D: Allocate Miles screen (Hunt Food + bottom sheet + quantity stepper, atomic Supabase transactions, offline SQLite queue + sync)
-- Plan E: Food decay Vercel Cron (grace period, −4/tick from game_config, state transitions, starving lock/unlock) + game_config seed
+- Plan E: Food decay Vercel Cron (grace period, −2.5/tick from game_config, state transitions, starving lock/unlock) + game_config seed
 
 **Note:** Raiders/Defend combat, Scout/Explore, and Medicine/Wood/Stone/Morale active uses are deferred to later phases (raiders defined but not built here).
 
