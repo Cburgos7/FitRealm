@@ -55,8 +55,8 @@
 **Mode:** mvp
 
 **Requirements:**
-- VLG-01, VLG-02, VLG-03, VLG-04, VLG-05, VLG-06, VLG-07, VLG-08
-- MOV-01, MOV-02, MOV-03, MOV-04, MOV-05, MOV-06, MOV-07, MOV-08, MOV-09, MOV-10, MOV-11
+- VLG-01, VLG-02, VLG-03, VLG-04, VLG-05, VLG-06, VLG-07, VLG-08, VLG-09
+- MOV-01, MOV-02, MOV-03, MOV-04, MOV-05, MOV-06, MOV-07, MOV-08, MOV-09, MOV-10, MOV-11, MOV-12
 - ALLOC-01, ALLOC-02, ALLOC-03, ALLOC-04, ALLOC-05
 - INFRA-02, INFRA-04
 
@@ -66,16 +66,20 @@
 1. User can start, track, and end an outdoor GPS session (auto-detected activity type, live route); route stored as GeoJSON; multiplied miles added to bank
 2. App passively reads HealthKit/Health Connect (steps + workouts), reconciles via gap-fill (no double-count), and banks miles via app-open prompt
 3. User can allocate banked miles to **Hunt Food (1 mi → 10 food)**; food updates immediately; offline allocations queue in SQLite and sync
-4. Food decays −2.5 per 6-hour tick (≈1 mile/day to maintain) via Vercel Cron; 24-hour grace period respected; village transitions Thriving → Hungry → Starving (locked) with correct visuals
+4. Food decays −2.5 per 6-hour tick (≈1 mile/day to maintain) via **Supabase pg_cron** (server-only); 24-hour grace period respected; village transitions Thriving → Hungry → Starving (locked) with correct visuals
 5. Starving village unlocks the moment any food is added; user can manually log treadmill activity (with anti-cheat caps) and it banks miles
 6. Full core loop (move → bank → allocate to food → village survives/starves) works end-to-end on physical iPhone + physical Android device
 
 **Plans (5):**
-- Plan A: Village view UI (Food meter + state visuals Thriving/Hungry/Starving, Mile Bank, non-decaying resource counts, static illustration, auto-created default village) connected to Supabase
-- Plan B: Active GPS tracker (Mapbox live map, Kalman filter, auto activity detection, GeoJSON to Storage) + manual entry with anti-cheat
-- Plan C: Passive movement (HealthKit/Health Connect steps+workouts, gap-fill reconciliation, app-open banking prompt, permissions)
-- Plan D: Allocate Miles screen (Hunt Food + bottom sheet + quantity stepper, atomic Supabase transactions, offline SQLite queue + sync)
-- Plan E: Food decay Vercel Cron (grace period, −2.5/tick from game_config, state transitions, starving lock/unlock) + game_config seed
+- [ ] 02-01-PLAN.md — Foundation: Phase 2 schema (food/state/grace + activities/allocations/game_config + RLS + seed) + native package installs + config-plugin chain + prebuild + 6 Wave-0 test scaffolds + real Village view (food state machine, colorblind-safe meter, auto-created Thornhaven) [Wave 1]
+- [ ] 02-02-PLAN.md — Active GPS tracker (Mapbox live map, Kalman filter, auto activity detection, GeoJSON to Storage, orphan recovery, recording banner) + manual-entry anti-cheat API [Wave 2]
+- [ ] 02-03-PLAN.md — Passive movement (HealthKit/Health Connect distance+workouts, gap-fill reconciliation, app-open banking prompt, A1 New-Arch smoke gate) [Wave 3]
+- [ ] 02-04-PLAN.md — Allocate Miles (Hunt Food + bottom sheet + quantity stepper, atomic allocate_food RPC, offline SQLite outbox + sync-on-reconnect) [Wave 2]
+- [ ] 02-05-PLAN.md — Food decay via Supabase pg_cron (grace period, −2.5/tick from game_config, state transitions, starving lock/unlock, grace badge) [Wave 3]
+
+**Wave structure:** W1 = 02-01 (foundation); W2 = 02-02 + 02-04 (parallel); W3 = 02-03 + 02-05 (parallel).
+
+**Deferred-but-noted:** VLG-07 (Watchtower decay reduction) + VLG-08 (maxed-village decay) reference Phase 6 buildings — captured as forward-compatible comments in the decay function; buildings NOT built here. VLG-09 (raiders) is concept-only this phase.
 
 **Note:** Raiders/Defend combat, Scout/Explore, and Medicine/Wood/Stone/Morale active uses are deferred to later phases (raiders defined but not built here).
 
@@ -182,7 +186,7 @@
 - Plan A: Faction core — create/join/leave/kick/disband flows, roles, governance (leader inactivity succession), join request mode
 - Plan B: Faction social — real-time activity feed (Supabase Realtime), Rally button + morale boost, weekly "Most Rallied" highlight
 - Plan C: Faction quests — weekly collective mile quest, member contribution flow, completion event + rewards, faction-wide random quest variant
-- Plan D: Building system — village view with 6 pre-set slots, construction + upgrade flows for all 6 buildings, visual tier changes, passive effect integration in decay cron
+- Plan D: Building system — village view with 6 pre-set slots, construction + upgrade flows for all 6 buildings, visual tier changes, passive effect integration in decay cron (Watchtower reduces food decay — VLG-07; balance invariant VLG-08 enforced)
 - Plan E: Village relocation — Move Camp flow (map browse → preview cost → confirm), distance-scaled costs, Caravan Discount, fog reset, Chronicle + faction event post; post-onboarding milestone quests
 
 ---
@@ -226,8 +230,8 @@
 |----------|-------------|-------|
 | AUTH-01–03 | Auth + session | 1 |
 | INFRA-05, INFRA-06 | Secrets, CI/CD | 1, 7 |
-| VLG-01–08 | Village state + decay | 2 |
-| MOV-01–11 | Movement tracking | 2 |
+| VLG-01–09 | Village state + decay | 2 |
+| MOV-01–12 | Movement tracking | 2 |
 | ALLOC-01–05 | Mile allocation | 2 |
 | INFRA-02, INFRA-04 | game_config, offline | 2 |
 | MAP-01–08 | Map, fog, landmarks, living world | 3 |
@@ -256,4 +260,4 @@
 
 ---
 *Roadmap created: 2026-05-24*
-*Last updated: 2026-05-24 after initial creation*
+*Last updated: 2026-06-04 — Phase 2 planned into 5 plans (02-01..02-05) across 3 waves*
