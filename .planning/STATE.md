@@ -49,7 +49,8 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 - 2026-05-24: Project initialized. PROJECT.md, config.json, REQUIREMENTS.md, ROADMAP.md created.
 - 2026-06-02: Phase 1 Plans A/B/C executed. All code written, 8/8 tests pass. Device verification deferred.
+- 2026-06-03: Phase 1 credentials wired (Supabase/Google/Vercel/RevenueCat live). Phase 2 context gathered — **core mechanic redesigned to food-only survival model** (REQUIREMENTS.md + ROADMAP.md updated). CONTEXT.md ready for planning.
 
 ## Next Action
 
-Return to desktop → complete deferred verification steps above → mark Phase 1 complete → begin Phase 2.
+Plan Phase 2: `/gsd-plan-phase 2`. (Phase 1 Android device smoke test still optionally pending on desktop.)

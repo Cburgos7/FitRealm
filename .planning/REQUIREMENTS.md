@@ -27,33 +27,37 @@ Requirements for the initial launch (Phase 0 + Phase 1). Each maps to roadmap ph
 
 ### Village & Resources (VILLAGE)
 
-- [ ] **VLG-01**: User's village has 4 decaying resource meters (Food, Medicine, Wood, Morale — each 0–100) plus a non-decaying Stone counter
+> **REDESIGNED 2026-06-03 (food-only survival model).** Food is the single decaying/survival resource. Medicine, Wood, Stone, and Morale are **non-decaying** inputs reserved for later systems (buildings, raiders, social). See `.planning/phases/02-core-movement-loop/02-CONTEXT.md` D2-01..D2-04.
+
+- [ ] **VLG-01**: User's village has a single decaying **Food** meter (0–100) as the survival resource, plus non-decaying Medicine, Wood, Morale, and Stone counters reserved for later systems
 - [ ] **VLG-02**: User's Mile Bank displays unspent miles available for allocation
-- [ ] **VLG-03**: Village transitions between states: thriving (all resources >20), struggling (any resource ≤20), ruined (all resources at 0 for 48+ hours)
-- [ ] **VLG-04**: Ruined village shows a somber but non-punishing visual ("sleeping kingdom") with "Your village awaits your return" banner
-- [ ] **VLG-05**: User can recover from Ruined state by spending 5 banked miles (instant, all resources to 50/100) or completing the Comeback Quest Chain
-- [ ] **VLG-06**: Village resources decay by −8 per resource per 6-hour tick (server-side Vercel Cron only — never client-side)
-- [ ] **VLG-07**: Watchtower reduces decay rate (Lv 1 = −10%, Lv 2 = −15%, Lv 3 = −20%)
-- [ ] **VLG-08**: Even a fully maxed village (all 6 buildings at Lv 3) still decays at ~−3/tick; movement is always required
+- [ ] **VLG-03**: Village transitions between states based on Food: **Thriving** (Food >20), **Hungry** (Food ≤20, still functional), **Starving** (Food = 0 — locked: scouting/other allocations disabled until fed)
+- [ ] **VLG-04**: Starving village shows a somber but non-punishing visual (dark/desaturated) with a "Your village awaits your return" card guiding the player to hunt food
+- [ ] **VLG-05**: User recovers from Starving instantly by adding any food (allocate miles → food); no premium cost — movement is the cure
+- [ ] **VLG-06**: Food decays by −4 per 6-hour tick (server-side Vercel Cron only — never client-side); rate lives in game_config
+- [ ] **VLG-07**: Watchtower reduces food decay rate (Lv 1 = −10%, Lv 2 = −15%, Lv 3 = −20%) [Phase 6]
+- [ ] **VLG-08**: Even a fully maxed village (all 6 buildings at Lv 3) still loses food each tick; movement is always required
+- [ ] **VLG-09**: Raiders are a distinct future threat (not decay); "Defend" protects against raiders. Concept locked, built in a later phase — NOT Phase 2
 
 ### Movement & Activity Tracking (MOVEMENT)
 
 - [ ] **MOV-01**: User can start a foreground GPS outdoor session with live Mapbox map, real-time distance, pace, and elapsed time
 - [ ] **MOV-02**: GPS points are filtered via Kalman filter; points with >20m accuracy are discarded
 - [ ] **MOV-03**: Completed outdoor route is saved as GeoJSON to Supabase Storage
-- [ ] **MOV-04**: Movement type multipliers apply on session end: walking 1.0×, running 1.25×, cycling 1.25×, hiking 1.5×
-- [ ] **MOV-05**: Completed session miles are added to the Mile Bank with narrative toast ("You hunted 1.2 miles!")
+- [ ] **MOV-04**: Activity type is **auto-detected from pace + elevation/GPS signals** (no manual override); multiplier boosts banked miles: walking 1.0×, running 1.25×, cycling 1.25×, hiking 1.5×. Multiplier applies once at banking time; food conversion stays flat (1 mi → 10 food)
+- [ ] **MOV-05**: Completed session miles are added to the Mile Bank with narrative toast ("Your hunters return — +X miles banked!")
 - [ ] **MOV-06**: If GPS is lost mid-session, partial route is preserved; session continues; user is prompted to save partial miles on end
-- [ ] **MOV-07**: Incomplete session (app killed with session open) is detected on next launch with prompt to save partial miles or discard
-- [ ] **MOV-08**: User can manually log treadmill/indoor activity (distance + duration inputs)
-- [ ] **MOV-09**: App detects synced workouts from Apple HealthKit (iOS) / Google Health Connect (Android) and prompts to add miles to bank
-- [ ] **MOV-10**: Location "When In Use" permission requested on first session start, NOT during onboarding (Apple rejection risk)
+- [ ] **MOV-07**: Incomplete session (app killed with session open) is auto-saved (partial miles banked silently with a toast) on next launch
+- [ ] **MOV-08**: User can manually log treadmill/indoor activity (distance + duration); pace derived from distance ÷ duration; subject to daily cap + pace sanity check (game_config)
+- [ ] **MOV-09**: App passively reads HealthKit (iOS) / Health Connect (Android) **daily steps + synced workouts**, using the platform's own distance value; reconciled via gap-fill (daily total minus already-credited session/workout distance) and banked via an app-open prompt. Resets at local midnight. **In Phase 2 scope.**
+- [ ] **MOV-10**: Location "When In Use" permission requested on first session start, NOT during onboarding (Apple rejection risk). Health/steps permission requested on first Move-tab visit
 - [ ] **MOV-11**: Android 12+ approximate location grant detected; user is prompted to grant precise location with explanation
+- [ ] **MOV-12**: Passively-read movement banks miles only — it does NOT auto-feed food; the player still allocates (preserves Move → Bank → Allocate)
 
 ### Mile Allocation (ALLOC)
 
 - [ ] **ALLOC-01**: User can open the Allocate Miles screen from the home screen at any time (not only after movement)
-- [ ] **ALLOC-02**: Allocate screen lists all options with mile costs: Hunt Food (0.5 mi → +20 Food), Gather Medicine (0.5 mi → +20 Medicine), Chop Wood (0.5 mi → +20 Wood), Quarry Stone (1.0 mi → +10 Stone), Scout Region (1.0 mi → fog-of-war reveal), Explore New Land (1.0 mi → new tile), Defend Village (2.0 mi → next decay tick blocked), Contribute to Faction (any amount), Establish Outpost (5.0 mi), Move Camp (5–75 mi, distance-scaled)
+- [ ] **ALLOC-02**: Allocate screen (bottom sheet over the village) lists options grouped by resource, basic survival first. **Core rate: Hunt Food = 1 mi → +10 Food** (0.1 mi = 1 food ≈ 0.161 km; rate in game_config), tap-once + quantity stepper for bulk. Phase 2 live set is **Hunt Food (survival)** plus non-decaying gather actions as applicable. Scout/Explore (Phase 3 map), Defend's raider effect (later phase), Contribute/Outpost/Move Camp (Phase 6) are NOT live in Phase 2
 - [ ] **ALLOC-03**: Options that cost more than the current bank balance are greyed out in UI; server-side validation rejects over-spend as backup
 - [ ] **ALLOC-04**: Allocations made while offline are queued in SQLite and synced to Supabase on reconnect
 - [ ] **ALLOC-05**: Supabase transactions atomically deduct miles and add resources (prevents race conditions from rapid taps)
