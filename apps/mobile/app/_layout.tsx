@@ -4,9 +4,16 @@ import { Slot, SplashScreen } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import Purchases from 'react-native-purchases';
+import MapboxGL from '@rnmapbox/maps';
 import { useAuthStore } from '@/store/useAuthStore';
 
 SplashScreen.preventAutoHideAsync();
+
+// Set Mapbox public access token once at app start (Pattern 2 — no download token needed).
+// Token comes from EXPO_PUBLIC_MAPBOX_TOKEN env var; falls back gracefully if not set.
+if (process.env.EXPO_PUBLIC_MAPBOX_TOKEN) {
+  MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN);
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
