@@ -66,7 +66,7 @@
 1. User can start, track, and end an outdoor GPS session (auto-detected activity type, live route); route stored as GeoJSON; multiplied miles added to bank
 2. App passively reads HealthKit/Health Connect (steps + workouts), reconciles via gap-fill (no double-count), and banks miles via app-open prompt
 3. User can allocate banked miles to **Hunt Food (1 mi → 10 food)**; food updates immediately; offline allocations queue in SQLite and sync
-4. Food decays −4 per 6-hour tick via Vercel Cron; 24-hour grace period respected; village transitions Thriving → Hungry → Starving (locked) with correct visuals
+4. Food decays −2.5 per 6-hour tick (≈1 mile/day to maintain) via Vercel Cron; 24-hour grace period respected; village transitions Thriving → Hungry → Starving (locked) with correct visuals
 5. Starving village unlocks the moment any food is added; user can manually log treadmill activity (with anti-cheat caps) and it banks miles
 6. Full core loop (move → bank → allocate to food → village survives/starves) works end-to-end on physical iPhone + physical Android device
 

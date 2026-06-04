@@ -34,7 +34,7 @@ Requirements for the initial launch (Phase 0 + Phase 1). Each maps to roadmap ph
 - [ ] **VLG-03**: Village transitions between states based on Food: **Thriving** (Food >20), **Hungry** (Food ≤20, still functional), **Starving** (Food = 0 — locked: scouting/other allocations disabled until fed)
 - [ ] **VLG-04**: Starving village shows a somber but non-punishing visual (dark/desaturated) with a "Your village awaits your return" card guiding the player to hunt food
 - [ ] **VLG-05**: User recovers from Starving instantly by adding any food (allocate miles → food); no premium cost — movement is the cure
-- [ ] **VLG-06**: Food decays by −4 per 6-hour tick (server-side Vercel Cron only — never client-side); rate lives in game_config
+- [ ] **VLG-06**: Food decays by −2.5 per 6-hour tick (10/day ≈ 1 mile/day to maintain; initial-dev tuning) — server-side Vercel Cron only, never client-side; rate lives in game_config
 - [ ] **VLG-07**: Watchtower reduces food decay rate (Lv 1 = −10%, Lv 2 = −15%, Lv 3 = −20%) [Phase 6]
 - [ ] **VLG-08**: Even a fully maxed village (all 6 buildings at Lv 3) still loses food each tick; movement is always required
 - [ ] **VLG-09**: Raiders are a distinct future threat (not decay); "Defend" protects against raiders. Concept locked, built in a later phase — NOT Phase 2

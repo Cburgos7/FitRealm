@@ -51,7 +51,7 @@ Movement is captured two ways: an **active GPS tracker** (live Mapbox map, route
 - **D2-23:** **Tap-to-allocate-once + a quantity stepper for bulk** (e.g., Hunt ×3 = 3 mi → +30 food) before confirming. Efficient after long runs.
 
 ### Decay, Grace Period & Tuning
-- **D2-24:** **Food decay: −4 per 6-hour tick (16/day)** → ~1.6 miles/day to maintain a full village. Forgiving/casual-friendly. Server-only Vercel Cron (VLG-06 invariant holds).
+- **D2-24:** **Food decay: −2.5 per 6-hour tick (10/day) = exactly 1 mile/day to maintain a full village** (initial-development tuning, deliberately cheap so banked miles are left over for other spends as later systems come online). A full village (100 food) lasts 10 days unfed. Food stored as a numeric value (decimal ticks are fine; display rounds). Server-only Vercel Cron (VLG-06 invariant holds). Trivially retuned via game_config.
 - **D2-25:** **24-hour grace period shown as a "Protected — Xh left" countdown badge** with reassuring first-time copy. Decay starts only after the window.
 - **D2-26:** **game_config holds ALL tunable values:** food decay rate & cadence, food-per-mile rate & Hunt cost, grace-period hours + hungry threshold (20) + food cap (100), activity multipliers + their pace/elevation detection bands, manual-entry daily cap. Nothing hardcoded.
 
@@ -141,7 +141,7 @@ No external ADRs/specs exist yet — requirements are captured in the decisions 
 <specifics>
 ## Specific Ideas
 
-- **Core economy anchors (user-specified):** 1 mile → 10 food (so 0.1 mi = 1 food ≈ 0.161 km). Food range 0–100. Food decay −4/6h. These seed game_config.
+- **Core economy anchors (user-specified):** 1 mile → 10 food (so 0.1 mi = 1 food ≈ 0.161 km). Food range 0–100. Food decay −2.5/6h (10/day = 1 mile/day to maintain). These seed game_config.
 - The user explicitly reframed the game around **food as the single heartbeat resource** and **raiders as a distinct future threat** — this is the defining decision of the phase and should anchor planning.
 - Default village name reference: "Thornhaven" (placeholder, used in copy examples).
 - Copy voice exemplar: "Your hunters return with a bountiful catch — +20 Food!" / "Thornhaven grows hungry."
