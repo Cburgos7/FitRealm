@@ -1,0 +1,37 @@
+{
+  "project_info": {
+    "project_number": "617321571117",
+    "project_id": "fitrealm-498320",
+    "storage_bucket": "fitrealm-498320.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:617321571117:android:0000000000000000",
+        "android_client_info": {
+          "package_name": "com.fitrealm.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "617321571117-q9g3vrrg89i2s3t928l7o9s4uf2vjog2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fitrealm.app",
+            "certificate_hash": "00964ed8eba60cac49725e7ea9d30ed8ec7bae48"
+          }
+        },
+        {
+          "client_id": "617321571117-7mdhjfn3hh0b8u7bve7jd62enpq0tid9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
