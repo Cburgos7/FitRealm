@@ -294,12 +294,17 @@ export function usePassiveHealth(): UsePassiveHealthResult {
       });
 
       if (rpcError) {
-        console.warn('[usePassiveHealth] increment_miles_banked error:', rpcError.message);
-        // Fall through to addCredit anyway so we don't re-prompt the same miles
+        // WR-05: the bank credit FAILED. Do NOT call addCredit — marking these
+        // miles "credited" while the bank never received them would permanently
+        // discard them. Leaving day_credits untouched means the gap-fill
+        // reconciliation re-surfaces the same delta on the next app open so the
+        // user can retry. (The finally block still hides this prompt instance.)
+        console.warn('[usePassiveHealth] increment_miles_banked error; miles NOT credited, will re-offer:', rpcError.message);
+        return;
       }
 
       // 3. Record credited miles so the next app open doesn't re-offer these miles
-      //    (T-02C-RPT mitigation — Pitfall 4)
+      //    (T-02C-RPT mitigation — Pitfall 4). Only reached on a SUCCESSFUL bank.
       await addCredit(today, promptDelta);
 
     } catch (err) {
