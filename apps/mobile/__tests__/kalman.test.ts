@@ -77,6 +77,31 @@ describe('KalmanFilter — MOV-02', () => {
     expect(Math.abs(result - 50)).toBeLessThan(0.01);
   });
 
+  it('WR-03: seeding with the first measurement before filtering yields the exact point', () => {
+    const FIRST_LAT = 51.5074; // London
+
+    // FIXED ORDER (WR-03): reset(measurement) BEFORE filter(measurement). The
+    // first stored point is then EXACTLY the real coordinate, so the next
+    // point's haversine delta is measured against a true seed (no spurious
+    // segment-2 distance).
+    const fixed = new KalmanFilter(DEFAULT_CONFIG);
+    fixed.reset(FIRST_LAT);
+    const fixedFirst = fixed.filter(FIRST_LAT);
+    expect(fixedFirst).toBeCloseTo(FIRST_LAT, 12);
+
+    // BUGGY ORDER (pre-fix): filter() on a default-x=0 filter, THEN reset to the
+    // filtered value. The first stored point is NOT the true measurement — it is
+    // pulled toward the x=0 default by (1 - gain), leaving a residual offset.
+    // For lat/lon-scale values this residual injects a spurious delta on the
+    // next segment. The fixed order eliminates that residual entirely.
+    const buggy = new KalmanFilter(DEFAULT_CONFIG);
+    const buggyFirst = buggy.filter(FIRST_LAT); // runs on x=0
+    const buggyResidual = Math.abs(buggyFirst - FIRST_LAT);
+    const fixedResidual = Math.abs(fixedFirst - FIRST_LAT);
+    expect(fixedResidual).toBeLessThan(buggyResidual);
+    expect(buggyResidual).toBeGreaterThan(0); // the old order leaves a real offset
+  });
+
   it('consecutive identical readings converge Kalman gain toward steady-state (non-increasing)', () => {
     const filter = new KalmanFilter(DEFAULT_CONFIG);
     filter.reset(1.0);
