@@ -29,7 +29,13 @@ module.exports = {
       [
         '@react-native-google-signin/google-signin',
         {
+          // IN-06: source the Google iOS URL scheme (reversed client ID) from an
+          // env var for consistency with the other auth config (web client id /
+          // RC keys are also env-sourced). A safe public fallback keeps prebuild
+          // working when the var is unset. The value is NOT a secret — Google
+          // client IDs are public by design.
           iosUrlScheme:
+            process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME ??
             'com.googleusercontent.apps.617321571117-4b3c5sfr23ac6jbc319u5ftkkggq6urb',
         },
       ],
