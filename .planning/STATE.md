@@ -54,14 +54,37 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 ## Phase 2 Plan Status
 
-| Plan | Wave | Description | Status |
-|------|------|-------------|--------|
-| 02-01 | 1 | Schema + native packages + Village view + Wave-0 tests | ☐ Not executed |
-| 02-02 | 2 | Active GPS tracker + manual anti-cheat API | ☐ Not executed |
-| 02-03 | 3 | Passive HealthKit/Health Connect + gap-fill | ☐ Not executed |
-| 02-04 | 2 | Allocate Miles + offline SQLite queue | ☐ Not executed |
-| 02-05 | 3 | Food decay via Supabase pg_cron | ☐ Not executed |
+**All 5 plans CODE-COMPLETE** (unit tests green: mobile 76/76, API 14/14, tsc clean). Device/build verification deferred to desktop — see punch-list below.
+
+| Plan | Wave | Description | Code | Device verify |
+|------|------|-------------|------|---------------|
+| 02-01 | 1 | Schema + native packages + Village view + Wave-0 tests | ✅ | ⏳ deferred |
+| 02-02 | 2 | Active GPS tracker + manual anti-cheat API | ✅ | ⏳ deferred |
+| 02-03 | 3 | Passive HealthKit/Health Connect + gap-fill | ✅ | ⏳ deferred (A1 gate) |
+| 02-04 | 2 | Allocate Miles + offline SQLite queue | ✅ | ⏳ deferred |
+| 02-05 | 3 | Food decay via Supabase pg_cron | ✅ | ⏳ deferred |
+
+## Phase 2 Deferred — Device/Build Punch-List (do at desktop + phone)
+
+**A. Apply schema (one push covers 3 migrations):**
+1. `npx supabase db push` — applies phase2_game, allocate_rpc, decay_cron migrations
+2. Verify in Supabase: game_config ≥18 keys; villages has food/food_state/grace_expires_at; allocate_food + decay_village_food functions exist; pg_cron job `food-decay-6h` scheduled; `routes` Storage bucket + RLS
+
+**B. Native build:**
+3. Add `EXPO_PUBLIC_MAPBOX_TOKEN=pk.*` to `apps/mobile/.env`
+4. `cd apps/mobile && npx expo prebuild --clean`
+5. EAS dev-client builds: `eas build -p android --profile development` and `-p ios` (iOS = EAS cloud only on Windows)
+
+**C. A1 RISK GATE (do before trusting iOS passive sync):**
+6. Physical iPhone: confirm `react-native-health` `getDistanceWalkingRunning` works under RN 0.76 New Arch. Fallback if it crashes: `@kingstinct/react-native-healthkit` or disable iOS passive sync for Phase 2.
+
+**D. Device E2E (success criterion #6 — iPhone + Android):**
+7. GPS session: route polyline + live stats + recording banner persists across tabs + End→Bank toast + GeoJSON in Storage + orphan recovery
+8. Allocate: Hunt Food online; offline queue → reconnect sync; over-budget rejection; idempotency (no double-spend); starve→Hunt→unlock
+9. Passive: health permission → app-open prompt → banks miles (food unchanged); gap-fill shows only delta after a GPS session
+10. Decay: SQL-trigger `decay_village_food()` → food −2.5, grace skip, floor at 0, state transitions; drain toast + grace badge on app open
+11. Phase 1 Android sign-in smoke test (still outstanding from Phase 1)
 
 ## Next Action
 
-Execute Phase 2: `/gsd-execute-phase 2`. (Phase 1 Android device smoke test still optionally pending on desktop.)
+Phase 2 code is done. When at desktop+phone: work the punch-list above, then `/gsd-verify-work 2` to validate, then Phase 3. (Could also run `/gsd-code-review` on the Phase 2 diff now if desired.)
