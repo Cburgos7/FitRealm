@@ -51,6 +51,7 @@ The following require a desktop + connected credentials before marking Phase 1 c
 - 2026-06-02: Phase 1 Plans A/B/C executed. All code written, 8/8 tests pass. Device verification deferred.
 - 2026-06-03: Phase 1 credentials wired (Supabase/Google/Vercel/RevenueCat live). Phase 2 context gathered — **core mechanic redesigned to food-only survival model** (REQUIREMENTS.md + ROADMAP.md updated).
 - 2026-06-03: Phase 2 PLANNED — research + 5 plans (3 waves) + validation strategy. Verified PASSED (plan-checker caught + fixed a day_credits double-counting contract). Key finding: food decay runs on Supabase pg_cron, not Vercel Cron (Hobby plan caps cron at once/day).
+- 2026-06-05: Phase 2 EXECUTED (code-complete, device verify deferred) + CODE REVIEW. Review found 5 blockers (incl. increment_miles_banked RPC defined in no migration — core bank loop was dead) + 9 warnings. Fixed all 5 blockers + WR-01/03/05 across 10 atomic commits; 3 new fix migrations written (push deferred). Tests: mobile 80/80, API 14/14, tsc clean.
 
 ## Phase 2 Plan Status
 
@@ -66,9 +67,10 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 ## Phase 2 Deferred — Device/Build Punch-List (do at desktop + phone)
 
-**A. Apply schema (one push covers 3 migrations):**
-1. `npx supabase db push` — applies phase2_game, allocate_rpc, decay_cron migrations
-2. Verify in Supabase: game_config ≥18 keys; villages has food/food_state/grace_expires_at; allocate_food + decay_village_food functions exist; pg_cron job `food-decay-6h` scheduled; `routes` Storage bucket + RLS
+**A. Apply schema (one push covers all 6 migrations, incl. 3 code-review fixes):**
+1. `npx supabase db push` — applies phase2_game, allocate_rpc, decay_cron + the 3 review-fix migrations (increment_miles_fix, rls_with_check_fix, allocate_food_race_fix)
+2. Verify in Supabase: game_config ≥18 keys; villages has food/food_state/grace_expires_at; `increment_miles_banked` + `allocate_food` + `decay_village_food` functions exist; activities/allocations RLS has WITH CHECK; pg_cron job `food-decay-6h` scheduled; `routes` Storage bucket + RLS
+2b. **Live-DB verification (flagged by code-fixer, can't be unit-tested):** CR-04 — concurrency test the `allocate_food` replay path (duplicate idempotency_key → one spend, returns idempotent:true); CR-03 — confirm manual-entry stored raw_distance semantics when the post-multiplier cap clamps a partial entry
 
 **B. Native build:**
 3. Add `EXPO_PUBLIC_MAPBOX_TOKEN=pk.*` to `apps/mobile/.env`
