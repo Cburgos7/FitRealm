@@ -20,6 +20,12 @@ jest.mock('@react-native-community/netinfo', () => ({
   __esModule: true,
   default: { fetch: jest.fn(), addEventListener: jest.fn() },
 }));
+// IN-01: expo-crypto's native module isn't resolvable under Jest. Mock
+// randomUUID with Node's crypto.randomUUID (also a CSPRNG-backed RFC-4122 v4),
+// so the format + uniqueness contract is still exercised here.
+jest.mock('expo-crypto', () => ({
+  randomUUID: () => require('crypto').randomUUID(),
+}));
 jest.mock('@/lib/supabase', () => ({ supabase: {} }));
 jest.mock('@/lib/sqliteQueue', () => ({
   enqueueAllocation: jest.fn(),

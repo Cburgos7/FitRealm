@@ -21,6 +21,7 @@
 import { useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import NetInfo from '@react-native-community/netinfo';
+import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGameStore } from '@/store/useGameStore';
@@ -188,14 +189,12 @@ export function generateIdempotencyKey(): string {
 }
 
 /**
- * RFC-4122 v4 UUID.  Uses Math.random() — acceptable for idempotency keys
- * (collision probability ≈ 1 in 10^38; not a security primitive here).
- * crypto.randomUUID() would be ideal but is not available in all RN envs.
+ * IN-01: RFC-4122 v4 UUID backed by a CSPRNG via expo-crypto's randomUUID()
+ * (available on Expo SDK 52 / RN 0.76 / Hermes). These keys gate real currency
+ * spend, so a collision-free, cryptographically-random source is preferred over
+ * the previous Math.random() implementation. The stable-key contract (CR-05) is
+ * unchanged: callers still mint one key per intent and reuse it across retries.
  */
 function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return Crypto.randomUUID();
 }
