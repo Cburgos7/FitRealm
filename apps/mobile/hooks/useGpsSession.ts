@@ -45,6 +45,20 @@ import { useGameConfig } from '@/hooks/useGameConfig';
 const CHECKPOINT_KEY = 'pending_session';
 const ACCURACY_THRESHOLD_M = 20;
 
+// WR-08: safe-default detector config mirroring the seeded game_config values.
+// Used when useGameConfig has not yet resolved at End-Session time, so a
+// completed session is banked normally (pace-derived walking/running) instead of
+// being silently dropped and mis-recovered later as a flat walking activity.
+const DEFAULT_DETECTOR_CONFIG: import('@/lib/activityDetector').ActivityDetectorConfig = {
+  pace_cycle_threshold_mph: 12,
+  pace_run_threshold_mpm: 12,
+  elevation_hike_gain_m: 50,
+  multiplier_walking: 1.0,
+  multiplier_running: 1.25,
+  multiplier_cycling: 1.25,
+  multiplier_hiking: 1.5,
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -282,13 +296,12 @@ export function useGpsSession(): UseGpsSessionReturn {
       return null;
     }
 
-    if (!config) {
-      // config not loaded — still stop session gracefully
-      setState((s) => ({ ...s, isActive: false }));
-      setSessionActive(false);
-      setSessionDistanceMi(0); // WR-01: clear banner distance
-      return null;
-    }
+    // WR-08: if game_config has not yet resolved, do NOT drop the completed
+    // session. Fall back to seeded-default multipliers/thresholds so the real
+    // distance is banked normally (pace-derived kind) instead of being stranded
+    // and later mis-recovered as a flat walking activity by orphan recovery.
+    const detectorConfig = (config ??
+      DEFAULT_DETECTOR_CONFIG) as import('@/lib/activityDetector').ActivityDetectorConfig;
 
     const elapsedSec = startedAtRef.current
       ? Math.floor((Date.now() - startedAtRef.current.getTime()) / 1000)
@@ -300,7 +313,7 @@ export function useGpsSession(): UseGpsSessionReturn {
     // For now, pass 0 (no elevation data) — hiking detection requires device E2E
     const elevGainMPerKm = 0;
 
-    const activityResult = detectActivityType(avgSpeedMph, paceMinPerMile, elevGainMPerKm, config as unknown as import('@/lib/activityDetector').ActivityDetectorConfig);
+    const activityResult = detectActivityType(avgSpeedMph, paceMinPerMile, elevGainMPerKm, detectorConfig);
     const milesEarned = rawDistanceMi * activityResult.multiplier;
 
     try {
