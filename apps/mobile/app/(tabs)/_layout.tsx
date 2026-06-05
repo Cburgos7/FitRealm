@@ -17,7 +17,8 @@ export default function TabsLayout() {
   const session = useAuthStore((s) => s.session);
   const isLoading = useAuthStore((s) => s.isLoading);
   const isSessionActive = useGameStore((s) => s.isSessionActive);
-  const village = useGameStore((s) => s.village);
+  // WR-01: live session distance pushed by useGpsSession on each accepted GPS point.
+  const sessionDistanceMi = useGameStore((s) => s.sessionDistanceMi);
 
   if (isLoading) {
     return (
@@ -30,12 +31,6 @@ export default function TabsLayout() {
   if (!session) {
     return <Redirect href="/sign-in" />;
   }
-
-  // Compute current distance from session state — the hook owns this value;
-  // we approximate it from the store or read from a shared ref if needed.
-  // For now we pass 0 and the banner shows "0.00 mi" which is fine until
-  // we wire the session distance into the game store in Task 2 device work.
-  const sessionDistanceMi = 0;
 
   return (
     <View style={{ flex: 1 }}>
