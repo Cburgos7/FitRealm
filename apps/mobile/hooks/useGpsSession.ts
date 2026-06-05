@@ -29,7 +29,7 @@ import * as Linking from 'expo-linking';
 import { Alert } from 'react-native';
 
 import { KalmanFilter } from '@/lib/kalman';
-import { haversineDistance } from '@/lib/haversine';
+import { haversineDistance, isNoiseSegment } from '@/lib/haversine';
 import { detectActivityType, ActivityResult } from '@/lib/activityDetector';
 import * as dayCredits from '@/lib/dayCredits';
 import { getTodayKey } from '@/lib/dayCredits';
@@ -44,6 +44,15 @@ import { useGameConfig } from '@/hooks/useGameConfig';
 
 const CHECKPOINT_KEY = 'pending_session';
 const ACCURACY_THRESHOLD_M = 20;
+
+// IN-02: minimum per-segment movement (metres). Accepted fixes whose haversine
+// delta from the last accepted point is below this are treated as GPS noise
+// (drift while standing still) and discarded — they neither accumulate distance
+// nor advance the route/baseline. This stops a stationary user with jittery
+// sub-20m fixes from inflating distance (and therefore miles). The baseline is
+// NOT advanced on a sub-threshold fix, so genuine slow movement still
+// accumulates once the cumulative drift crosses the threshold.
+const MIN_SEGMENT_DISTANCE_M = 4;
 
 // WR-08: safe-default detector config mirroring the seeded game_config values.
 // Used when useGameConfig has not yet resolved at End-Session time, so a
@@ -246,6 +255,14 @@ export function useGpsSession(): UseGpsSessionReturn {
         // (no spurious segment from the seed point).
         if (lastAcceptedRef.current) {
           const deltaM = haversineDistance(lastAcceptedRef.current, point);
+          // IN-02: drop sub-threshold segments as GPS noise. Do NOT advance the
+          // baseline or append to the route on a noise fix — that way cumulative
+          // slow movement still crosses the threshold and counts, while
+          // stationary jitter is rejected.
+          if (isNoiseSegment(deltaM, MIN_SEGMENT_DISTANCE_M)) {
+            setState((s) => ({ ...s, accuracyM: accuracy }));
+            return;
+          }
           const deltaMi = deltaM / 1609.344;
           distanceMiRef.current += deltaMi;
         }

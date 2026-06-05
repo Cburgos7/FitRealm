@@ -41,3 +41,15 @@ export function haversineDistance(
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
+
+/**
+ * IN-02: returns true when a GPS segment is below the minimum movement
+ * threshold and should be treated as noise (drift while standing still),
+ * i.e. NOT accumulated into session distance.
+ *
+ * @param deltaM     Segment length in metres (e.g. from haversineDistance)
+ * @param minSegM    Minimum per-segment movement in metres (~3-5m typical)
+ */
+export function isNoiseSegment(deltaM: number, minSegM: number): boolean {
+  return deltaM < minSegM;
+}
