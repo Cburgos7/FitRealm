@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGameConfig } from '@/hooks/useGameConfig';
 import { useGameStore } from '@/store/useGameStore';
 import { useAllocate, generateIdempotencyKey } from '@/hooks/useAllocate';
+import { formatMiles } from '@/lib/format';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 interface AllocateSheetProps {
@@ -284,13 +285,6 @@ function ComingSoonOption({ icon, name }: { icon: string; name: string }) {
       </View>
     </View>
   );
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatMiles(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return n.toFixed(1);
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────

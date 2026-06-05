@@ -45,6 +45,7 @@ import { useSyncQueue } from '@/hooks/useSyncQueue';
 import { useGameStore } from '@/store/useGameStore';
 import { foodToState } from '@/lib/villageState';
 import { initQueue, getPendingCount } from '@/lib/sqliteQueue';
+import { formatMiles, formatResource } from '@/lib/format';
 
 // ─── Drain framing constants (D2-28/D2-33) ────────────────────────────────────
 
@@ -200,16 +201,18 @@ export default function VillageScreen() {
 
           {/* Resource counts row */}
           <View style={styles.resourceRow}>
-            {/* Mile Bank (VLG-02) — with PendingBadge overlay for offline queue */}
+            {/* Mile Bank (VLG-02) — with PendingBadge overlay for offline queue.
+                IN-04: formatMiles preserves fractional precision so the chip
+                matches the AllocateSheet balance and the canAfford check. */}
             <View style={styles.chipWrapper}>
-              <ResourceChip icon="⚡" label="Miles" value={formatNum(village.milesBanked)} />
+              <ResourceChip icon="⚡" label="Miles" value={formatMiles(village.milesBanked)} />
               <PendingBadge />
             </View>
-            {/* Non-decaying counts (VLG-01) */}
-            <ResourceChip icon="💊" label="Med"    value={formatNum(village.medicine)} />
-            <ResourceChip icon="🪵" label="Wood"   value={formatNum(village.wood)} />
-            <ResourceChip icon="🪨" label="Stone"  value={formatNum(village.stone)} />
-            <ResourceChip icon="🎵" label="Morale" value={formatNum(village.morale)} />
+            {/* Non-decaying whole-unit counts (VLG-01) */}
+            <ResourceChip icon="💊" label="Med"    value={formatResource(village.medicine)} />
+            <ResourceChip icon="🪵" label="Wood"   value={formatResource(village.wood)} />
+            <ResourceChip icon="🪨" label="Stone"  value={formatResource(village.stone)} />
+            <ResourceChip icon="🎵" label="Morale" value={formatResource(village.morale)} />
           </View>
         </View>
       </View>
@@ -267,14 +270,6 @@ function ResourceChip({ icon, label, value }: ResourceChipProps) {
       <Text style={styles.chipValue}>{value}</Text>
     </View>
   );
-}
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatNum(n: number | null | undefined): string {
-  if (n == null) return '0';
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(Math.round(n));
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
