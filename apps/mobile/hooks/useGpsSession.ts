@@ -79,6 +79,7 @@ interface UseGpsSessionReturn extends GpsSessionState {
 export function useGpsSession(): UseGpsSessionReturn {
   const { data: config } = useGameConfig();
   const setSessionActive = useGameStore((s) => s.setSessionActive);
+  const setSessionDistanceMi = useGameStore((s) => s.setSessionDistanceMi);
   const village = useGameStore((s) => s.village);
 
   const [state, setState] = useState<GpsSessionState>({
@@ -181,6 +182,7 @@ export function useGpsSession(): UseGpsSessionReturn {
       paceMinPerMile: 0,
     }));
     setSessionActive(true);
+    setSessionDistanceMi(0); // WR-01: reset banner distance at session start
 
     // Elapsed time ticker
     timerRef.current = setInterval(() => {
@@ -210,20 +212,28 @@ export function useGpsSession(): UseGpsSessionReturn {
           return;
         }
 
+        // WR-03: seed the filters with the FIRST raw measurement BEFORE
+        // filtering it, so the first stored point is the real coordinate — not
+        // a value biased from the filter's x=0 default toward (0,0). Previously
+        // the first filter() ran on x=0 and produced a corrupted near-(0,0)
+        // blend, and the next point's haversine delta against that bad seed
+        // injected a large spurious distance on segment 2 (inflating miles).
+        if (!lastAcceptedRef.current) {
+          latFilterRef.current.reset(latitude);
+          lonFilterRef.current.reset(longitude);
+        }
+
         // Kalman smooth
         const smoothLat = latFilterRef.current.filter(latitude);
         const smoothLon = lonFilterRef.current.filter(longitude);
         const point: [number, number] = [smoothLon, smoothLat];
 
-        // Accumulate distance
+        // Accumulate distance only when a previous accepted point exists
+        // (no spurious segment from the seed point).
         if (lastAcceptedRef.current) {
           const deltaM = haversineDistance(lastAcceptedRef.current, point);
           const deltaMi = deltaM / 1609.344;
           distanceMiRef.current += deltaMi;
-        } else {
-          // Seed filters on first accepted point
-          latFilterRef.current.reset(smoothLat);
-          lonFilterRef.current.reset(smoothLon);
         }
         lastAcceptedRef.current = point;
         routeCoordsRef.current = [...routeCoordsRef.current, point];
@@ -234,6 +244,10 @@ export function useGpsSession(): UseGpsSessionReturn {
         }
         await writeCheckpoint(distanceMiRef.current);
 
+        // WR-01: push live distance into the store so the persistent
+        // RecordingBanner (rendered in (tabs)/_layout) shows real distance.
+        setSessionDistanceMi(distanceMiRef.current);
+
         setState((s) => ({
           ...s,
           distanceMi: distanceMiRef.current,
@@ -242,7 +256,7 @@ export function useGpsSession(): UseGpsSessionReturn {
         }));
       },
     );
-  }, [getConfigNum, requestPermission, setSessionActive, writeCheckpoint]);
+  }, [getConfigNum, requestPermission, setSessionActive, setSessionDistanceMi, writeCheckpoint]);
 
   // ---------- stop + bank ----------
 
@@ -263,6 +277,7 @@ export function useGpsSession(): UseGpsSessionReturn {
     if (rawDistanceMi <= 0) {
       setState((s) => ({ ...s, isActive: false }));
       setSessionActive(false);
+      setSessionDistanceMi(0); // WR-01: clear banner distance
       await SecureStore.deleteItemAsync(CHECKPOINT_KEY);
       return null;
     }
@@ -271,6 +286,7 @@ export function useGpsSession(): UseGpsSessionReturn {
       // config not loaded — still stop session gracefully
       setState((s) => ({ ...s, isActive: false }));
       setSessionActive(false);
+      setSessionDistanceMi(0); // WR-01: clear banner distance
       return null;
     }
 
@@ -348,6 +364,7 @@ export function useGpsSession(): UseGpsSessionReturn {
         paceMinPerMile: 0,
       });
       setSessionActive(false);
+      setSessionDistanceMi(0); // WR-01: clear banner distance
 
       return { result: activityResult, distanceMi: rawDistanceMi };
     } catch (err) {
@@ -355,9 +372,10 @@ export function useGpsSession(): UseGpsSessionReturn {
       // Still stop UI session — checkpoint remains for orphan recovery
       setState((s) => ({ ...s, isActive: false }));
       setSessionActive(false);
+      setSessionDistanceMi(0); // WR-01: clear banner distance
       return null;
     }
-  }, [config, setSessionActive]);
+  }, [config, setSessionActive, setSessionDistanceMi]);
 
   // ---------- orphan recovery (MOV-07 / D2-14) ----------
 
