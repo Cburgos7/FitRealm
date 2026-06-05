@@ -31,6 +31,7 @@ import { useGpsSession } from '@/hooks/useGpsSession';
 import { usePassiveHealth } from '@/hooks/usePassiveHealth';
 import { PassiveBankPrompt } from '@/components/move/PassiveBankPrompt';
 import { supabase } from '@/lib/supabase';
+import { getTodayKey } from '@/lib/dayCredits';
 
 export default function MoveScreen() {
   const insets = useSafeAreaInsets();
@@ -119,7 +120,16 @@ export default function MoveScreen() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ distanceMi: distMi, durationMin: durMin }),
+        // WR-07: send the device-local day key + timezone offset so the API's
+        // manual daily-cap window matches the user's local day (the same
+        // local-midnight definition day_credits uses, D2-08) instead of the
+        // server's UTC wall clock.
+        body: JSON.stringify({
+          distanceMi: distMi,
+          durationMin: durMin,
+          dayKey: getTodayKey(),
+          tzOffsetMinutes: new Date().getTimezoneOffset(),
+        }),
       });
 
       const body = await res.json();

@@ -22,6 +22,46 @@ import { SupabaseClient, createClient } from '@supabase/supabase-js';
 // Types for dependency injection
 // ---------------------------------------------------------------------------
 
+/**
+ * WR-07: a UTC half-open window [startUtcMs, endUtcMs) representing the user's
+ * LOCAL calendar day. Computed from the client's local-midnight day key and its
+ * timezone offset so the manual daily-cap window matches the device-local day
+ * used by day_credits (D2-08).
+ */
+export interface DayWindow {
+  startUtcMs: number;
+  endUtcMs: number;
+}
+
+/**
+ * WR-07: build the device-local-day UTC window from a 'YYYY-MM-DD' local-midnight
+ * day key and the device's Date#getTimezoneOffset() value (minutes to add to
+ * local time to reach UTC). Returns null if the inputs are malformed so the
+ * caller can fall back to the server-local day.
+ *
+ *   localMidnightUtcMs = Date.UTC(y, m-1, d) + tzOffsetMinutes * 60_000
+ *
+ * Example: UTC-8 (offset +480) on 2026-06-04 → 2026-06-04T08:00:00Z start,
+ * 2026-06-05T08:00:00Z end — exactly the device's local calendar day.
+ */
+export function buildLocalDayWindow(
+  dayKey: unknown,
+  tzOffsetMinutes: unknown,
+): DayWindow | null {
+  if (typeof dayKey !== 'string') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (!match) return null;
+  const offset = Number(tzOffsetMinutes);
+  if (!Number.isFinite(offset)) return null;
+
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const startUtcMs = Date.UTC(y, m - 1, d) + offset * 60_000;
+  const endUtcMs = startUtcMs + 24 * 60 * 60 * 1000;
+  return { startUtcMs, endUtcMs };
+}
+
 export interface ActivityDeps {
   /**
    * Validates a JWT token and returns the user id, or null if invalid.
@@ -35,9 +75,16 @@ export interface ActivityDeps {
    */
   getConfig: (keys: string[]) => Promise<Record<string, number>>;
   /**
-   * Returns the total manual miles credited to userId today (from activities table).
+   * Returns the total manual miles credited to userId for the user's local
+   * "today" (from the activities table).
+   *
+   * WR-07: `dayWindow` carries the device-local day boundaries (as UTC instants)
+   * derived from the client's local-midnight day key + timezone offset, so the
+   * cap window matches the client's `day_credits` bookkeeping (D2-08) instead of
+   * the server's UTC wall clock. When omitted (e.g. older clients / tests), the
+   * implementation falls back to the server-local calendar day.
    */
-  getTodayManualMiles: (userId: string) => Promise<number>;
+  getTodayManualMiles: (userId: string, dayWindow?: DayWindow) => Promise<number>;
   /**
    * Inserts an activity row and returns the new activity id.
    */
@@ -90,19 +137,33 @@ export function createProductionDeps(): ActivityDeps {
       return map;
     },
 
-    async getTodayManualMiles(userId: string) {
-      const today = new Date();
-      const startOfDay = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate(),
-      ).toISOString();
-      const { data, error } = await admin
+    async getTodayManualMiles(userId: string, dayWindow?: DayWindow) {
+      // WR-07: prefer the client's device-local day window so the cap resets at
+      // the user's local midnight (consistent with day_credits). Fall back to
+      // the server-local calendar day when the client did not supply a window.
+      let startIso: string;
+      let endIso: string | null = null;
+      if (dayWindow) {
+        startIso = new Date(dayWindow.startUtcMs).toISOString();
+        endIso = new Date(dayWindow.endUtcMs).toISOString();
+      } else {
+        const today = new Date();
+        startIso = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+        ).toISOString();
+      }
+
+      let q = admin
         .from('activities')
         .select('miles_earned')
         .eq('user_id', userId)
         .eq('type', 'manual')
-        .gte('created_at', startOfDay);
+        .gte('created_at', startIso);
+      if (endIso) q = q.lt('created_at', endIso);
+
+      const { data, error } = await q;
       if (error) throw new Error(`Daily total read failed: ${error.message}`);
       return (data ?? []).reduce((sum: number, r: { miles_earned: number }) => sum + (r.miles_earned ?? 0), 0);
     },
@@ -179,9 +240,13 @@ export function createActivityRouter(deps?: ActivityDeps): Router {
     const { userId } = authResult;
 
     // 2. Input validation
-    const { distanceMi, durationMin } = req.body as {
+    const { distanceMi, durationMin, dayKey, tzOffsetMinutes } = req.body as {
       distanceMi?: unknown;
       durationMin?: unknown;
+      // WR-07: device-local day key ('YYYY-MM-DD') + Date#getTimezoneOffset()
+      // so the daily cap window matches the user's local day (D2-08).
+      dayKey?: unknown;
+      tzOffsetMinutes?: unknown;
     };
 
     if (distanceMi === undefined || distanceMi === null) {
@@ -240,10 +305,12 @@ export function createActivityRouter(deps?: ActivityDeps): Router {
       return;
     }
 
-    // 5. Daily cap check
+    // 5. Daily cap check — use the device-local day window when the client
+    //    provided one (WR-07), else fall back to the server-local day.
+    const dayWindow = buildLocalDayWindow(dayKey, tzOffsetMinutes) ?? undefined;
     let todayTotal: number;
     try {
-      todayTotal = await d.getTodayManualMiles(userId);
+      todayTotal = await d.getTodayManualMiles(userId, dayWindow);
     } catch {
       res.status(500).json({ error: 'Failed to check daily total' });
       return;

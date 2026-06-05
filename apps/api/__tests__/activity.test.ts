@@ -13,7 +13,11 @@
 
 import request from 'supertest';
 import express from 'express';
-import { createActivityRouter, ActivityDeps } from '../src/routes/activity';
+import {
+  createActivityRouter,
+  ActivityDeps,
+  buildLocalDayWindow,
+} from '../src/routes/activity';
 
 // ---------------------------------------------------------------------------
 // Mock deps builder
@@ -52,7 +56,7 @@ function buildDeps(overrides: Partial<{
 
     getConfig: jest.fn(async (_keys: string[]) => config),
 
-    getTodayManualMiles: jest.fn(async (_userId: string) => todayMiles),
+    getTodayManualMiles: jest.fn(async (_userId: string, _dayWindow?: unknown) => todayMiles),
 
     insertActivity: jest.fn(async (_row) => {
       if (insertFails) throw new Error('DB insert failed');
@@ -74,6 +78,15 @@ function buildApp(opts: Parameters<typeof buildDeps>[0] = {}) {
   app.use(express.json());
   app.use('/activity', createActivityRouter(buildDeps(opts)));
   return app;
+}
+
+// Variant that also returns the deps so tests can assert how the route called them.
+function buildAppWithDeps(opts: Parameters<typeof buildDeps>[0] = {}) {
+  const deps = buildDeps(opts);
+  const app = express();
+  app.use(express.json());
+  app.use('/activity', createActivityRouter(deps));
+  return { app, deps };
 }
 
 const VALID_TOKEN = 'valid-jwt-token';
@@ -222,5 +235,70 @@ describe('POST /activity/manual — MOV-08 anti-cheat', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.code).toBe('DAILY_CAP_EXCEEDED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WR-07: device-local daily-cap window
+// ---------------------------------------------------------------------------
+
+describe('buildLocalDayWindow (WR-07)', () => {
+  it('builds a 24h UTC window for a UTC-8 device (offset +480)', () => {
+    const win = buildLocalDayWindow('2026-06-04', 480);
+    expect(win).not.toBeNull();
+    // Local midnight 2026-06-04 00:00 (UTC-8) == 2026-06-04T08:00:00Z
+    expect(new Date(win!.startUtcMs).toISOString()).toBe('2026-06-04T08:00:00.000Z');
+    expect(new Date(win!.endUtcMs).toISOString()).toBe('2026-06-05T08:00:00.000Z');
+    expect(win!.endUtcMs - win!.startUtcMs).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('builds a UTC-aligned window for offset 0', () => {
+    const win = buildLocalDayWindow('2026-06-04', 0);
+    expect(new Date(win!.startUtcMs).toISOString()).toBe('2026-06-04T00:00:00.000Z');
+    expect(new Date(win!.endUtcMs).toISOString()).toBe('2026-06-05T00:00:00.000Z');
+  });
+
+  it('handles a UTC+5:30 device (offset -330)', () => {
+    const win = buildLocalDayWindow('2026-06-04', -330);
+    // Local midnight in IST == 2026-06-03T18:30:00Z
+    expect(new Date(win!.startUtcMs).toISOString()).toBe('2026-06-03T18:30:00.000Z');
+  });
+
+  it('returns null for malformed inputs', () => {
+    expect(buildLocalDayWindow('06/04/2026', 0)).toBeNull();
+    expect(buildLocalDayWindow('2026-6-4', 0)).toBeNull();
+    expect(buildLocalDayWindow(undefined, 0)).toBeNull();
+    expect(buildLocalDayWindow('2026-06-04', 'x')).toBeNull();
+    expect(buildLocalDayWindow('2026-06-04', undefined)).toBeNull();
+  });
+});
+
+describe('POST /activity/manual — WR-07 day window passthrough', () => {
+  it('passes the device-local day window to getTodayManualMiles when dayKey + tzOffsetMinutes are sent', async () => {
+    const { app, deps } = buildAppWithDeps({ todayMiles: 0 });
+
+    await request(app)
+      .post('/activity/manual')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ distanceMi: 2, durationMin: 40, dayKey: '2026-06-04', tzOffsetMinutes: 480 });
+
+    expect(deps.getTodayManualMiles).toHaveBeenCalledTimes(1);
+    const [, dayWindow] = (deps.getTodayManualMiles as jest.Mock).mock.calls[0];
+    expect(dayWindow).toBeDefined();
+    expect(new Date(dayWindow.startUtcMs).toISOString()).toBe('2026-06-04T08:00:00.000Z');
+    expect(new Date(dayWindow.endUtcMs).toISOString()).toBe('2026-06-05T08:00:00.000Z');
+  });
+
+  it('falls back to server-local day (undefined window) when no dayKey is sent', async () => {
+    const { app, deps } = buildAppWithDeps({ todayMiles: 0 });
+
+    await request(app)
+      .post('/activity/manual')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ distanceMi: 2, durationMin: 40 });
+
+    expect(deps.getTodayManualMiles).toHaveBeenCalledTimes(1);
+    const [, dayWindow] = (deps.getTodayManualMiles as jest.Mock).mock.calls[0];
+    expect(dayWindow).toBeUndefined();
   });
 });
