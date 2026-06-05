@@ -12,7 +12,7 @@
  * Navigates back to Move hub after banking.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { router } from 'expo-router';
 import MapboxGL from '@rnmapbox/maps';
@@ -97,58 +97,66 @@ export default function TrackerScreen() {
     router.back();
   };
 
-  // GeoJSON shape for the route polyline (Pattern 2)
-  const routeShape: GeoJSON.FeatureCollection = {
-    type: 'FeatureCollection',
-    features: routeCoords.length >= 2
-      ? [
-          {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: routeCoords,
-            },
-          },
-        ]
-      : [],
-  };
+  // WR-09: memoize the GeoJSON route shape so it is only rebuilt when the
+  // route coordinates actually change (not on every render — pace/elapsed
+  // ticks re-render this screen every second).
+  const routeShape: GeoJSON.FeatureCollection = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features:
+        routeCoords.length >= 2
+          ? [
+              {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: routeCoords,
+                },
+              },
+            ]
+          : [],
+    }),
+    [routeCoords],
+  );
 
-  // Camera follows last known position
-  const lastCoord = routeCoords[routeCoords.length - 1];
-  const cameraCenter = lastCoord
-    ? { latitude: lastCoord[1], longitude: lastCoord[0] }
-    : undefined;
+  // WR-09: memoize the camera centre ([lon, lat] per Mapbox convention) and
+  // only recompute when the latest coordinate changes. Passed explicitly to the
+  // Camera as centerCoordinate so the first fix has a real centre instead of an
+  // undefined one fighting followUserLocation.
+  const cameraCenter = useMemo<[number, number] | undefined>(() => {
+    const last = routeCoords[routeCoords.length - 1];
+    return last ? [last[0], last[1]] : undefined;
+  }, [routeCoords]);
 
   return (
     <View style={styles.container}>
-      {/* Full-screen Mapbox map
-          @ts-ignore — @rnmapbox/maps types are not fully compatible with React 18 */}
+      {/* Full-screen Mapbox map. @ts-expect-error narrows the known
+          @rnmapbox/maps↔React-18 JSX element-type incompatibility to THIS tag —
+          a real prop typo elsewhere will still surface (unlike a blanket
+          @ts-ignore). */}
+      {/* @ts-expect-error — MapView element type mismatch with React 18 JSX runtime */}
       <MapboxGL.MapView
         style={styles.map}
         styleURL={MapboxGL.StyleURL.Outdoors}
         logoEnabled={false}
         attributionEnabled={false}
       >
-        {cameraCenter && (
-          // @ts-ignore — Camera type mismatch with React 18
-          <MapboxGL.Camera
-            followUserLocation
-            followZoomLevel={16}
-            animationMode="easeTo"
-            animationDuration={500}
-          />
-        )}
+        <MapboxGL.Camera
+          followUserLocation
+          followZoomLevel={16}
+          centerCoordinate={cameraCenter}
+          animationMode="easeTo"
+          animationDuration={500}
+        />
 
-        {/* User position puck — @ts-ignore React 18 compat */}
-        {/* @ts-ignore */}
         <MapboxGL.LocationPuck />
 
         {/* Route polyline (Pattern 2) */}
         {routeCoords.length >= 2 && (
-          // @ts-ignore — ShapeSource children prop type mismatch with React 18
+          // @ts-expect-error — ShapeSource element type mismatch with React 18 JSX runtime
           <MapboxGL.ShapeSource id="route" shape={routeShape}>
-            {/* @ts-ignore */}
+            {/* @ts-expect-error — LineLayer element type mismatch with React 18 JSX runtime */}
             <MapboxGL.LineLayer
               id="routeLine"
               style={{
@@ -160,7 +168,6 @@ export default function TrackerScreen() {
             />
           </MapboxGL.ShapeSource>
         )}
-        {/* @ts-ignore — closing tag for MapView */}
       </MapboxGL.MapView>
 
       {/* Accuracy indicator dot (D2-12) */}
