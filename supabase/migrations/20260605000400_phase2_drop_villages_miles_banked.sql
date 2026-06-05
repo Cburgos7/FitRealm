@@ -1,0 +1,22 @@
+-- =============================================================
+-- Phase 2: Core Movement Loop — drop dead villages.miles_banked (IN-05)
+-- =============================================================
+-- Migration: 20260605000400_phase2_drop_villages_miles_banked.sql
+--
+-- Fixes IN-05: phase2_game added villages.miles_banked but documented it as
+-- "reserved / unused" — the canonical Mile Bank is profiles.miles_banked.
+-- A duplicate authoritative-looking column invites future bugs where code
+-- reads/writes the wrong one.
+--
+-- Verified before dropping: a repo-wide grep shows NO code path reads or writes
+-- villages.miles_banked. The only canonical bank usages are:
+--   * profiles.miles_banked  — read by useVillage, mutated by increment_miles_banked
+--     and allocate_food RPCs.
+-- The villages.miles_banked references are confined to migration DDL and
+-- planning docs (where it is explicitly called out as unused).
+--
+-- DROP COLUMN IF EXISTS is idempotent: re-running after the column is gone is a
+-- no-op.
+-- =============================================================
+
+ALTER TABLE public.villages DROP COLUMN IF EXISTS miles_banked;
