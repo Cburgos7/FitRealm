@@ -52,7 +52,8 @@ export interface ActivityDeps {
   }) => Promise<{ id: string } | null>;
   /**
    * Increments profiles.miles_banked for the user.
-   * Non-fatal if it fails.
+   * CR-01/WR-04: throws on failure so the route can return an error status
+   * instead of reporting success while the bank was never credited.
    */
   incrementMilesBanked: (userId: string, miles: number) => Promise<void>;
 }
@@ -131,7 +132,9 @@ export function createProductionDeps(): ActivityDeps {
         p_miles: miles,
       });
       if (error) {
-        console.error('miles_banked increment failed:', error.message);
+        // CR-01/WR-04: surface the failure so the route does not report
+        // success while the bank was never credited.
+        throw new Error(`miles_banked increment failed: ${error.message}`);
       }
     },
   };
@@ -256,15 +259,22 @@ export function createActivityRouter(deps?: ActivityDeps): Router {
       return;
     }
 
-    // Clamp to remaining cap
-    const remainingCap = dailyCap - todayTotal;
-    const creditableDistance = Math.min(distNum, remainingCap);
-
     // 6. Derive multiplier from pace bands (walking/running only — D2-18)
     const multiplier =
       paceMinPerMile <= paceRunThresholdMpm ? multiplierRunning : multiplierWalking;
 
-    const milesEarned = creditableDistance * multiplier;
+    // CR-03: enforce the daily cap on the FINAL credited miles (post-multiplier),
+    // not on raw distance. Clamping raw distance let milesEarned = distance ×
+    // multiplier overshoot the cap whenever multiplier > 1 (e.g. running 1.25×:
+    // 10 raw mi under a 10-mile cap banked 12.5 miles). We compute the uncapped
+    // earned miles, clamp THAT to the remaining cap, then derive the stored raw
+    // distance back from the credited miles so the row stays internally
+    // consistent (rawDistance × multiplier === milesEarned).
+    const remainingCap = Math.max(0, dailyCap - todayTotal);
+    const milesEarnedRaw = distNum * multiplier;
+    const milesEarned = Math.min(milesEarnedRaw, remainingCap);
+    const creditableDistance = multiplier > 0 ? milesEarned / multiplier : 0;
+
     const activityKind = paceMinPerMile <= paceRunThresholdMpm ? 'running' : 'walking';
     const endedAt = new Date().toISOString();
     const startedAt = new Date(Date.now() - durNum * 60 * 1000).toISOString();
@@ -286,8 +296,15 @@ export function createActivityRouter(deps?: ActivityDeps): Router {
       return;
     }
 
-    // 8. Increment miles_banked (non-fatal)
-    await d.incrementMilesBanked(userId, milesEarned);
+    // 8. Increment miles_banked — CR-01/WR-04: fatal. If crediting the bank
+    //    fails we must NOT report success, otherwise the activity row counts
+    //    against the daily cap while the user never received the miles.
+    try {
+      await d.incrementMilesBanked(userId, milesEarned);
+    } catch {
+      res.status(500).json({ error: 'Activity recorded but crediting miles failed. Please retry.' });
+      return;
+    }
 
     res.status(200).json({
       success: true,
