@@ -21,7 +21,7 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -113,6 +113,17 @@ export function useVillage() {
   // Stored in a ref (not state) to avoid re-render loops.
   const lastSeenFoodRef = useRef<number | null>(null);
 
+  // WR-02: food-drop detection is computed INSIDE the sync effect (against the
+  // ref BEFORE it is updated) and stored in state — NOT derived during render
+  // against a ref the same effect mutates. The previous render-time derivation
+  // raced the effect: on a re-render with unchanged data the ref already equalled
+  // curr, so the flag flipped back to false and the drain toast was missed (or,
+  // depending on render timing, shown with a stale delta / duplicated).
+  const [foodDrop, setFoodDrop] = useState<{ detected: boolean; delta: number }>({
+    detected: false,
+    delta: 0,
+  });
+
   const query = useQuery<VillageWithMiles>({
     queryKey: ['village', userId],
     queryFn: () => fetchOrCreateVillage(userId!),
@@ -161,31 +172,26 @@ export function useVillage() {
     };
     setVillage(snapshot);
 
+    // ── Food-drop detection (WR-02) ───────────────────────────────────────────
+    // Compute the drop here, comparing the NEW server food against the previously
+    // seen value, BEFORE we overwrite the ref. Storing the result in state means
+    // the Village screen reads a stable value that does not flip back on a
+    // re-render with the same data. The detection is purely comparative — the
+    // client NEVER subtracts food itself (decay is server-only, VLG-06).
+    const prev = lastSeenFoodRef.current;
+    if (prev !== null && d.food < prev) {
+      setFoodDrop({ detected: true, delta: d.food - prev }); // delta < 0
+    } else {
+      setFoodDrop({ detected: false, delta: 0 });
+    }
+
     // Update the last-seen food tracker for the next comparison
     lastSeenFoodRef.current = d.food;
   }, [query.data, setVillage]);
 
-  // ── Food-drop detection ─────────────────────────────────────────────────────
-  // Compute whether the latest fetch shows a lower food value than what we
-  // last showed. Used by the Village screen to trigger drain framing (D2-28).
-  // The detection is purely comparative — the client NEVER subtracts food itself.
-  let foodDropDetected = false;
-  let foodDelta = 0;
-
-  if (query.data && lastSeenFoodRef.current !== null) {
-    const prev = lastSeenFoodRef.current;
-    const curr = query.data.food;
-    // Only count as a "drop" if the food went down AND the village is past grace
-    // (grace-window villages don't decay, so any drop inside grace is unexpected)
-    if (curr < prev) {
-      foodDropDetected = true;
-      foodDelta = curr - prev; // negative number (e.g., -2.5 per tick)
-    }
-  }
-
   return {
     ...query,
-    foodDropDetected,
-    foodDelta,
+    foodDropDetected: foodDrop.detected,
+    foodDelta: foodDrop.delta,
   };
 }
