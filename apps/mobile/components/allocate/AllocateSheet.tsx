@@ -30,7 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useGameConfig } from '@/hooks/useGameConfig';
 import { useGameStore } from '@/store/useGameStore';
-import { useAllocate } from '@/hooks/useAllocate';
+import { useAllocate, generateIdempotencyKey } from '@/hooks/useAllocate';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 interface AllocateSheetProps {
@@ -59,6 +59,20 @@ export function AllocateSheet({
   // Quantity stepper state (D2-23)
   const [quantity, setQuantity] = useState(1);
   const [isConfirming, setIsConfirming] = useState(false);
+
+  // CR-05: stable idempotency key per allocation intent. One key is reused for
+  // every retry of the SAME intent (same action + quantity) — including a
+  // re-press after a transport error and the offline-queue replay — so the
+  // server's idempotency_key UNIQUE dedupes the re-attempt instead of letting it
+  // become a second real spend. A fresh key is minted when the intent signature
+  // changes (quantity edited) or after a successful allocation.
+  const intentRef = useRef<{ signature: string; key: string } | null>(null);
+  const getIntentKey = useCallback((signature: string): string => {
+    if (!intentRef.current || intentRef.current.signature !== signature) {
+      intentRef.current = { signature, key: generateIdempotencyKey() };
+    }
+    return intentRef.current.key;
+  }, []);
 
   // Read rates from game_config (INFRA-02); fall back to seeded defaults
   const huntMilesCost = Number(config?.['hunt_food_miles_cost'] ?? 1);
@@ -108,28 +122,41 @@ export function AllocateSheet({
     if (!canAfford || isConfirming) return;
     setIsConfirming(true);
 
+    // CR-05: reuse the SAME key for this intent across retries + offline replay.
+    const idempotencyKey = getIntentKey(`hunt_food:${quantity}`);
+
     const result = await allocate({
       milesCost: totalMilesCost,
       foodGain: totalFoodGain,
       action: 'hunt_food',
       db,
       hungryThreshold,
+      idempotencyKey,
     });
 
     setIsConfirming(false);
 
     if (result.insufficientMiles) {
+      // Intent refused — mint a fresh key next time so a later, genuinely new
+      // attempt is not deduped against this rejected one.
+      intentRef.current = null;
       onInsufficientMiles?.();
     } else if (result.success) {
+      // Intent fulfilled (synced or queued) — retire this key so the next
+      // allocation is a distinct intent.
+      intentRef.current = null;
       onSuccess?.(totalFoodGain);
       onClose();
     }
-    // If result.mode === 'error' (transport error) we leave the sheet open
-    // so the user can try again.
+    // If result.mode === 'error' (transport error) we leave the sheet open AND
+    // keep intentRef so a re-press reuses the same idempotency key (the server
+    // may have already committed the first attempt).
   }, [
     canAfford,
     isConfirming,
     allocate,
+    getIntentKey,
+    quantity,
     totalMilesCost,
     totalFoodGain,
     db,

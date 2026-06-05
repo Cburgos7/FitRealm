@@ -41,6 +41,14 @@ interface AllocateParams {
   db: SQLiteDatabase | null;
   /** Hungry threshold from game_config for food_state recompute */
   hungryThreshold?: number;
+  /**
+   * CR-05: Stable idempotency key for THIS user intent (one per confirm press).
+   * The SAME key is threaded through the optimistic online RPC AND the
+   * offline-queue enqueue so a retry of the same intent dedupes server-side
+   * (allocations.idempotency_key UNIQUE). If omitted, a key is generated once
+   * here as a fallback — callers SHOULD pass a stable key (see AllocateSheet).
+   */
+  idempotencyKey?: string;
 }
 
 interface AllocateResult {
@@ -71,16 +79,23 @@ export function useAllocate() {
       action = 'hunt_food',
       db,
       hungryThreshold = HUNGRY_THRESHOLD_FALLBACK,
+      idempotencyKey: providedKey,
     } = params;
 
     if (!session?.user?.id) {
       return { success: false, mode: 'error' };
     }
 
-    // ── Generate a fresh UUID idempotency key ──────────────────────────────
-    const idempotencyKey = generateUUID();
+    // ── CR-05: stable idempotency key per intent ───────────────────────────
+    // Use the caller-provided key (one per confirm press, reused across retries
+    // and the offline enqueue) so the server's idempotency_key UNIQUE actually
+    // dedupes a re-attempt of the SAME intent. Fall back to a generated key only
+    // when the caller did not supply one.
+    const idempotencyKey = providedKey ?? generateUUID();
 
-    // Guard against double-fire (Pitfall rapid tap at JS level)
+    // Guard against double-fire while THIS intent is in flight. Keying on the
+    // stable intent id makes this guard real (previously the per-call fresh UUID
+    // was never already present, so the guard was dead).
     if (inFlightKeys.current.has(idempotencyKey)) {
       return { success: false, mode: 'error' };
     }
@@ -161,6 +176,16 @@ export function useAllocate() {
 }
 
 // ─── UUID helper ─────────────────────────────────────────────────────────────
+
+/**
+ * CR-05: Generate a stable idempotency key for one allocation intent.
+ * Callers (e.g. AllocateSheet) create this ONCE per confirm press and reuse it
+ * across retries + the offline enqueue so the server dedupes re-attempts of the
+ * same intent. Exported so the key is generated with the same scheme used here.
+ */
+export function generateIdempotencyKey(): string {
+  return generateUUID();
+}
 
 /**
  * RFC-4122 v4 UUID.  Uses Math.random() — acceptable for idempotency keys
