@@ -312,13 +312,20 @@ export function useGpsSession(): UseGpsSessionReturn {
 
       if (actErr) throw actErr;
 
-      // 2. Increment profiles.miles_banked
-      await supabase.rpc('increment_miles_banked', {
+      // 2. Increment profiles.miles_banked — CR-01: surface the RPC error so a
+      //    failed credit does NOT mark the miles as credited below. Throwing
+      //    lands us in the catch block, which leaves the SecureStore checkpoint
+      //    intact for orphan recovery to re-bank on next launch.
+      const { error: bankErr } = await supabase.rpc('increment_miles_banked', {
         p_user_id: user.id,
         p_miles: milesEarned,
       });
+      if (bankErr) {
+        throw new Error(`increment_miles_banked failed: ${bankErr.message}`);
+      }
 
       // 3. Record in day_credits so passive gap-fill doesn't double-count (D2-06/Pitfall 4)
+      //    Only reached when the bank credit above succeeded.
       await dayCredits.ensureTable();
       await dayCredits.addCredit(getTodayKey(), milesEarned);
 
@@ -386,12 +393,19 @@ export function useGpsSession(): UseGpsSessionReturn {
         .select('id')
         .single();
 
-      await supabase.rpc('increment_miles_banked', {
+      // CR-01: if the bank credit fails, do NOT addCredit and do NOT clear the
+      // checkpoint — leave it so the next launch retries orphan recovery rather
+      // than silently discarding the miles.
+      const { error: bankErr } = await supabase.rpc('increment_miles_banked', {
         p_user_id: user.id,
         p_miles: partialMi,
       });
+      if (bankErr) {
+        console.warn('Orphan recovery bank failed; keeping checkpoint for retry:', bankErr.message);
+        return false;
+      }
 
-      // Record in day_credits (D2-06)
+      // Record in day_credits (D2-06) — only after a successful bank.
       await dayCredits.ensureTable();
       await dayCredits.addCredit(getTodayKey(), partialMi);
 
