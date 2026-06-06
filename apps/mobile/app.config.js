@@ -14,6 +14,9 @@ module.exports = {
       bundleIdentifier: 'com.fitrealm.app',
       googleServicesFile: process.env.GOOGLE_SERVICE_INFO_PLIST ?? './GoogleService-Info.plist',
       supportsTablet: false,
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+      },
     },
     android: {
       package: 'com.fitrealm.app',
