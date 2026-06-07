@@ -52,16 +52,14 @@ module.exports = {
             'FitRealm uses your location to track your movement and earn miles for your village.',
         },
       ],
-      [
-        'react-native-health',
-        {
-          healthSharePermission:
-            'FitRealm reads your movement data to credit miles to your village.',
-          healthUpdatePermission:
-            'FitRealm logs your movement sessions to Apple Health.',
-        },
-      ],
-      'expo-health-connect',
+      // react-native-health (iOS HealthKit) is temporarily removed from the plugin chain
+      // pending the A1 New Architecture smoke test on a physical iPhone. The pod spec
+      // conflicts with RN 0.76 New Arch — tracked in Phase 2 punch-list.
+      // 'react-native-health' plugin re-add once confirmed working.
+      //
+      // Android Health Connect: use react-native-health-connect's own plugin (v3.5.3)
+      // instead of the outdated expo-health-connect@0.1.1 wrapper.
+      'react-native-health-connect',
       [
         'expo-build-properties',
         {
