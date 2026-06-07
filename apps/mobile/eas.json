@@ -9,14 +9,18 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
-      }
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      }
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
     },
-    "production": {}
+    "production": {
+      "prebuildCommand": "npx expo prebuild --clean"
+    }
   }
 }
