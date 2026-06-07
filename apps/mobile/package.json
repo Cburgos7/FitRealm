@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-health"
+      ]
+    }
+  },
   "scripts": {
     "start": "expo start --dev-client",
     "android": "expo run:android",
