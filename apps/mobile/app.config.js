@@ -43,10 +43,10 @@ module.exports = {
         },
       ],
       'expo-apple-authentication',
-      // Phase 2: GPS location permission
-      // @rnmapbox/maps and react-native-health-connect temporarily removed from the
-      // plugin chain to isolate EAS build failures. Will re-add once base build
-      // is confirmed working. Health packages deferred per A1 punch-list.
+      // Phase 2: native GPS + build config
+      // (react-native-health iOS HealthKit still deferred — A1 risk)
+      // (react-native-health-connect uses runtime require — no plugin needed)
+      '@rnmapbox/maps',
       [
         'expo-location',
         {
@@ -54,7 +54,18 @@ module.exports = {
             'FitRealm uses your location to track your movement and earn miles for your village.',
         },
       ],
+      [
+        'expo-build-properties',
+        {
+          android: {
+            compileSdkVersion: 35,
+            targetSdkVersion: 35,
+            minSdkVersion: 26,
+          },
+        },
+      ],
     ],
+    newArchEnabled: true,
     experiments: {
       typedRoutes: true,
     },
