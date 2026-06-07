@@ -4,7 +4,7 @@
   "workspaces": [
     "apps/*"
   ],
-  "devDependencies": {
-    "expo": "~52.0.49"
+  "overrides": {
+    "@expo/config-plugins": "~9.0.0"
   }
 }
