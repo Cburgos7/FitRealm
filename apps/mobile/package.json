@@ -6,7 +6,9 @@
   "expo": {
     "autolinking": {
       "exclude": [
-        "react-native-health"
+        "react-native-health",
+        "@rnmapbox/maps",
+        "react-native-purchases"
       ]
     }
   },
