@@ -53,6 +53,7 @@ The following require a desktop + connected credentials before marking Phase 1 c
 - 2026-06-03: Phase 2 PLANNED — research + 5 plans (3 waves) + validation strategy. Verified PASSED (plan-checker caught + fixed a day_credits double-counting contract). Key finding: food decay runs on Supabase pg_cron, not Vercel Cron (Hobby plan caps cron at once/day).
 - 2026-06-05: Phase 2 EXECUTED (code-complete, device verify deferred) + CODE REVIEW. Review found 20 findings (5 blockers / 9 warnings / 6 info); headline: increment_miles_banked RPC defined in no migration (core bank loop was dead). **ALL 20 findings now resolved** across 21 atomic fix commits + 6 new fix migrations (push deferred). Tests: mobile 92/92, API 20/20, tsc clean.
 - 2026-06-07: **EAS dev-client builds GREEN on both platforms.** Resolved 9 distinct build blockers: prebuildCommand for monorepo, SDK 52 version pinning (vs hoisted SDK 56), @expo/config-plugins override, react-native-health autolinking exclude (A1), New Architecture enabled, babel-preset-expo wired, app.json removed, google-services.json api_key added, EAS GOOGLE_SERVICES_JSON secret refreshed. APK + iOS .app artifacts ready for device install.
+- 2026-06-08: **Phase 2 database fully verified live on production Supabase.** All 9 Phase 2 migrations + 6 review-fix migrations confirmed applied. Verified via SQL: 18 game_config keys seeded, all 3 RPCs present, pg_cron job `0 */6 * * *` scheduled, RLS WITH CHECK on activities/allocations, routes bucket, villages columns correct. DB is empty (0 profiles/villages) — first sign-in will be the live test of the full data flow.
 
 ## Phase 2 Plan Status
 
@@ -68,11 +69,20 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 ## Phase 2 Deferred — Device/Build Punch-List (do at desktop + phone)
 
-**A. Apply schema (one push covers all 9 Phase 2 migrations, incl. 6 code-review fixes):**
-1. `npx supabase db push` — applies phase2_game, allocate_rpc, decay_cron + 6 review-fix migrations (increment_miles_fix, rls_with_check_fix, allocate_food_race_fix, routes_delete_policy, drop_villages_miles_banked, decay_single_greatest)
-2. Verify in Supabase: game_config ≥18 keys; villages has food/food_state/grace_expires_at; `increment_miles_banked` + `allocate_food` + `decay_village_food` functions exist; activities/allocations RLS has WITH CHECK; routes storage has insert/select/update/delete own-folder policies; pg_cron job `food-decay-6h` scheduled; `routes` Storage bucket
-2b. **Live-DB verification (can't be unit-tested):** CR-04 — concurrency test `allocate_food` replay (duplicate idempotency_key → one spend, returns idempotent:true); CR-03 — confirm manual-entry stored raw_distance semantics when post-multiplier cap clamps a partial entry
-2c. **WR-09 device check:** Mapbox `centerCoordinate`/`followUserLocation` interaction + the 3 scoped `@ts-expect-error` suppressions in tracker.tsx need device confirmation
+**A. Apply schema** ✅ **DONE 2026-06-08** (all 9 Phase 2 migrations live on production Supabase)
+- All migration timestamps match between local and remote (`supabase migration list` confirms)
+- game_config: 18 keys seeded (food_decay_per_tick=2.5, food_per_mile=10, food_cap=100, grace_period_hours=24, plus 14 more)
+- Functions live: `allocate_food`, `decay_village_food`, `increment_miles_banked`
+- pg_cron job scheduled: `0 */6 * * *` (every 6 hours)
+- villages.food / food_state / grace_expires_at columns present
+- villages.miles_banked dropped (IN-05); profiles.miles_banked is the canonical bank
+- activities/allocations RLS has WITH CHECK (CR-02 fix verified)
+- `routes` Storage bucket exists
+
+**Remaining live-DB verifications (require a signed-in user — happen during device E2E):**
+- CR-04 — concurrency test `allocate_food` replay (duplicate idempotency_key → one spend, returns idempotent:true). DB has 0 profiles/villages right now so can't run yet — will be implicitly exercised once you sign in
+- CR-03 — confirm manual-entry stored raw_distance semantics when post-multiplier cap clamps
+- WR-09 — Mapbox `centerCoordinate`/`followUserLocation` interaction + 3 `@ts-expect-error` suppressions in tracker.tsx
 
 **B. Native build:** ✅ **DONE 2026-06-07**
 - Android dev APK: https://expo.dev/artifacts/eas/aNG2dN8vXJ6f34qyXXu5Fg.apk
@@ -98,11 +108,15 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 ## Next Action
 
-**Phase 2: device E2E remains.** Builds are ready to install (URLs above). Recommended sequence:
-1. Apply schema: `npx supabase db push` (covers all 9 Phase 2 migrations)
-2. Install APK on Android emulator/device → smoke test sign-in + village + GPS + allocate
-3. Install iOS `.app` on Simulator → smoke test sign-in + village
-4. Repair Jest test suite (item E above) so CI is green again
-5. `/gsd-verify-work 2` to formally validate Phase 2, then begin Phase 3
+**Phase 2: device E2E remains** (schema + builds both done as of 2026-06-08). Recommended sequence when you have your phone/device handy:
+1. Install APK on Android emulator/device → smoke test sign-in + auto-create Thornhaven + GPS + Hunt Food
+2. Install iOS `.app` on Simulator → smoke test sign-in + village
+3. Repair Jest test suite (item E above) so CI is green again — can be done remotely without device
+4. `/gsd-verify-work 2` to formally validate Phase 2, then begin Phase 3
 
-Also outstanding (low priority): Phase 1 Android sign-in smoke test, originally deferred — implicitly covered by step 2 above.
+The Phase 1 Android sign-in smoke test (deferred since June) is implicitly covered by step 1.
+
+While you're not at a device, options for remote work right now:
+- **Repair the Jest test suite** (item E) — pure code, no device needed
+- **`/gsd-discuss-phase 3`** — World Map & Exploration (Mapbox fantasy style, fog of war, Living World cron)
+- **`/gsd-plan-phase 3`** — research + plan Phase 3 after discussion
