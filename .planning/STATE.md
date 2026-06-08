@@ -53,7 +53,8 @@ The following require a desktop + connected credentials before marking Phase 1 c
 - 2026-06-03: Phase 2 PLANNED — research + 5 plans (3 waves) + validation strategy. Verified PASSED (plan-checker caught + fixed a day_credits double-counting contract). Key finding: food decay runs on Supabase pg_cron, not Vercel Cron (Hobby plan caps cron at once/day).
 - 2026-06-05: Phase 2 EXECUTED (code-complete, device verify deferred) + CODE REVIEW. Review found 20 findings (5 blockers / 9 warnings / 6 info); headline: increment_miles_banked RPC defined in no migration (core bank loop was dead). **ALL 20 findings now resolved** across 21 atomic fix commits + 6 new fix migrations (push deferred). Tests: mobile 92/92, API 20/20, tsc clean.
 - 2026-06-07: **EAS dev-client builds GREEN on both platforms.** Resolved 9 distinct build blockers: prebuildCommand for monorepo, SDK 52 version pinning (vs hoisted SDK 56), @expo/config-plugins override, react-native-health autolinking exclude (A1), New Architecture enabled, babel-preset-expo wired, app.json removed, google-services.json api_key added, EAS GOOGLE_SERVICES_JSON secret refreshed. APK + iOS .app artifacts ready for device install.
-- 2026-06-08: **Phase 2 database fully verified live on production Supabase.** All 9 Phase 2 migrations + 6 review-fix migrations confirmed applied. Verified via SQL: 18 game_config keys seeded, all 3 RPCs present, pg_cron job `0 */6 * * *` scheduled, RLS WITH CHECK on activities/allocations, routes bucket, villages columns correct. DB is empty (0 profiles/villages) — first sign-in will be the live test of the full data flow.
+- 2026-06-08: **Phase 2 database fully verified live on production Supabase.** All 9 Phase 2 migrations + 6 review-fix migrations confirmed applied. Verified via SQL: 18 game_config keys seeded, all 3 RPCs present, pg_cron job `0 */6 * * *` scheduled, RLS WITH CHECK on activities/allocations, routes bucket, villages columns correct.
+- 2026-06-08: **PHASE 2 RUNNING ON PHYSICAL iPhone.** Built `development-device` profile (signed for UDID 00008140-001A3C591A90801C), registered via spawned PowerShell window driven through user's remote desktop. Connected via ngrok tunnel dev server. End-to-end validated: Apple Sign-In → Thornhaven auto-created → manual entry (1 mi / 15 min auto-detected as running, 1.25× multiplier → 1.25 mi banked) → Hunt Food allocation (atomic RPC, capped at 100). 6 fix commits during session: app/index.tsx root gate, headerShown:false, query invalidation after manual entry, useGpsSession state reset, Vercel env var name compat (SUPABASE_SERVICE_KEY vs _ROLE_KEY), Vercel API redeployed. Dev decay-tick button added behind __DEV__; migration `20260608000000_dev_decay_my_village.sql` written but NOT yet pushed.
 
 ## Phase 2 Plan Status
 
@@ -108,15 +109,16 @@ The following require a desktop + connected credentials before marking Phase 1 c
 
 ## Next Action
 
-**Phase 2: device E2E remains** (schema + builds both done as of 2026-06-08). Recommended sequence when you have your phone/device handy:
-1. Install APK on Android emulator/device → smoke test sign-in + auto-create Thornhaven + GPS + Hunt Food
-2. Install iOS `.app` on Simulator → smoke test sign-in + village
-3. Repair Jest test suite (item E above) so CI is green again — can be done remotely without device
-4. `/gsd-verify-work 2` to formally validate Phase 2, then begin Phase 3
+**Phase 2 is functionally validated on iPhone.** Remaining items (none blocking):
 
-The Phase 1 Android sign-in smoke test (deferred since June) is implicitly covered by step 1.
+1. **Push `20260608000000_dev_decay_my_village.sql`** — `cd F:\CODING\FitRealm && npx supabase db push`. Enables the `__DEV__` "🐛 Decay tick" button on the Village screen.
+2. **Outdoor GPS test** (~5 min in driveway/yard) — indoors the IN-02 noise filter (≥4m segments) correctly rejects most jitter, so distance stayed at 0. Outdoor 3-5m accuracy will work.
+3. **Starve → recover loop** — once decay button is wired, tap it 40 times (or set food=0 via SQL) → see Starving lock state → Hunt Food → unlock visual.
+4. **Apple + Google nonce fixes** — half-done in sign-in.tsx (`generateNoncePair` helper added; not yet wired into the signIn calls). Both currently work because the providers aren't enforcing strict nonce, but proper fix should pass `nonce: hashedNonce` to the SDK and `nonce: rawNonce` to `supabase.auth.signInWithIdToken`. Issue surfaced during testing — Apple worked once provider was enabled; Google initially errored "Passed nonce and nonce in id_token should either both exist or not" then started working too.
+5. **Repair Jest test suite** (item E) — babel.config.js interaction with hoisted root expo broke 92 mobile + 20 API tests. Code-only work, doable remotely.
+6. **`/gsd-verify-work 2`** to formally close Phase 2.
+7. **Phase 3 discuss + plan** — World Map & Exploration.
 
-While you're not at a device, options for remote work right now:
-- **Repair the Jest test suite** (item E) — pure code, no device needed
-- **`/gsd-discuss-phase 3`** — World Map & Exploration (Mapbox fantasy style, fog of war, Living World cron)
-- **`/gsd-plan-phase 3`** — research + plan Phase 3 after discussion
+**EAS env reminder:** apple-specific password `mcbz-hiog-cwpa-ipyx` was used to register the iPhone UDID. Revoke at appleid.apple.com when convenient and rotate; not required for ongoing builds (cert + provisioning are now stored in EAS).
+
+**Dev server reference:** `cd apps/mobile && npx expo start --dev-client --tunnel` for remote-phone testing. ngrok URL goes in the dev-client launcher.
