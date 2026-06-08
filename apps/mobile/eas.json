@@ -12,6 +12,14 @@
       },
       "prebuildCommand": "npx expo prebuild --clean"
     },
+    "development-device": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
+    },
     "preview": {
       "distribution": "internal",
       "android": {
