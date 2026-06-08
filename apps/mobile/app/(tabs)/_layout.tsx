@@ -34,7 +34,7 @@ export default function TabsLayout() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Tabs>
+      <Tabs screenOptions={{ headerShown: false }}>
         <Tabs.Screen name="village/index" options={{ title: 'Village' }} />
         <Tabs.Screen name="map/index" options={{ title: 'Map' }} />
         <Tabs.Screen name="move/index" options={{ title: 'Move' }} />

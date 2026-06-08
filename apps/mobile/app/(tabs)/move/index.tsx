@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useGpsSession } from '@/hooks/useGpsSession';
 import { usePassiveHealth } from '@/hooks/usePassiveHealth';
@@ -36,6 +37,7 @@ import { getTodayKey } from '@/lib/dayCredits';
 export default function MoveScreen() {
   const insets = useSafeAreaInsets();
   const { recoverOrphanSession } = useGpsSession();
+  const queryClient = useQueryClient();
 
   // Passive health hook — permission + gap-fill + bank prompt (MOV-09 / D2-10 / D2-15)
   const {
@@ -138,6 +140,10 @@ export default function MoveScreen() {
         Alert.alert('Entry Rejected', body.error ?? `Server error: ${res.status}`);
         return;
       }
+
+      // Invalidate the village query so the Mile Bank chip refreshes immediately
+      // when the user navigates back to the Village tab.
+      void queryClient.invalidateQueries({ queryKey: ['village'] });
 
       Alert.alert(
         'Miles Banked!',

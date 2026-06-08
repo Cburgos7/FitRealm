@@ -306,7 +306,21 @@ export function useGpsSession(): UseGpsSessionReturn {
     const routeCoords = routeCoordsRef.current;
 
     if (rawDistanceMi <= 0) {
-      setState((s) => ({ ...s, isActive: false }));
+      // Full reset — partial spread left elapsedSeconds/distanceMi/routeCoords
+      // intact, so re-entering the tracker showed the old timer.
+      setState({
+        isActive: false,
+        distanceMi: 0,
+        elapsedSeconds: 0,
+        routeCoords: [],
+        accuracyM: null,
+        paceMinPerMile: 0,
+      });
+      // Clear refs so a fresh session starts from a clean slate
+      distanceMiRef.current = 0;
+      routeCoordsRef.current = [];
+      lastAcceptedRef.current = null;
+      startedAtRef.current = null;
       setSessionActive(false);
       setSessionDistanceMi(0); // WR-01: clear banner distance
       await SecureStore.deleteItemAsync(CHECKPOINT_KEY);

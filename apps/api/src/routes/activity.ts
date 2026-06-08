@@ -111,7 +111,9 @@ export interface ActivityDeps {
 
 export function createProductionDeps(): ActivityDeps {
   const supabaseUrl = process.env.SUPABASE_URL!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  // Accept either env-var name (Phase 1 used SUPABASE_SERVICE_KEY in Vercel,
+  // the rest of the codebase docs call it SUPABASE_SERVICE_ROLE_KEY).
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY)!;
 
   const admin: SupabaseClient = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },

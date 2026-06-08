@@ -34,6 +34,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SQLite from 'expo-sqlite';
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { VillageScene } from '@/components/village/VillageScene';
 import { FoodMeter } from '@/components/village/FoodMeter';
 import { GraceBadge } from '@/components/village/GraceBadge';
@@ -181,6 +183,21 @@ export default function VillageScreen() {
   const food = village.food ?? 100;
   const foodState = foodToState(food, hungryThreshold);
 
+  // Dev-only: trigger one decay tick on this user's village via the
+  // dev_decay_my_village RPC. Visible only when __DEV__ is true (release
+  // builds strip it out at compile time).
+  const queryClient = useQueryClient();
+  const onDevDecayTick = async () => {
+    try {
+      const { error } = await supabase.rpc('dev_decay_my_village');
+      if (error) throw error;
+      void queryClient.invalidateQueries({ queryKey: ['village'] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Dev decay failed', msg);
+    }
+  };
+
   return (
     <View style={styles.screen}>
       {/* Full-bleed scene background */}
@@ -214,6 +231,20 @@ export default function VillageScreen() {
             <ResourceChip icon="🪨" label="Stone"  value={formatResource(village.stone)} />
             <ResourceChip icon="🎵" label="Morale" value={formatResource(village.morale)} />
           </View>
+
+          {/* Dev-only: manual decay tick — bypasses 6-hour pg_cron schedule for testing.
+              Stripped from release builds (Metro removes blocks where __DEV__ is false). */}
+          {__DEV__ && (
+            <View style={styles.devRow}>
+              <TouchableOpacity
+                onPress={onDevDecayTick}
+                accessibilityLabel="Dev: decay food one tick"
+                style={styles.devButton}
+              >
+                <Text style={styles.devButtonText}>🐛 Decay tick</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
 
@@ -350,6 +381,26 @@ const styles = StyleSheet.create({
   chipValue: {
     color: '#e0cfa9',
     fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Dev button row (only rendered in __DEV__)
+  devRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+  },
+  devButton: {
+    backgroundColor: 'rgba(255, 80, 80, 0.18)',
+    borderColor: 'rgba(255, 80, 80, 0.55)',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  devButtonText: {
+    color: '#ffb3b3',
+    fontSize: 11,
     fontWeight: '600',
   },
 

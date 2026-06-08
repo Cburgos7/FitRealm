@@ -36,6 +36,7 @@ Requirements for the initial launch (Phase 0 + Phase 1). Each maps to roadmap ph
 - [ ] **VLG-05**: User recovers from Starving instantly by adding any food (allocate miles → food); no premium cost — movement is the cure
 - [ ] **VLG-06**: Food decays by −2.5 per 6-hour tick (10/day ≈ 1 mile/day to maintain; initial-dev tuning) — server-side Vercel Cron only, never client-side; rate lives in game_config
 - [ ] **VLG-07**: Watchtower reduces food decay rate (Lv 1 = −10%, Lv 2 = −15%, Lv 3 = −20%) [Phase 6]
+- [ ] **VLG-10**: Storehouse increases food_cap (Lv 1/2/3 modifiers TBD in Phase 6); allocate_food's cap clamp reads the building-modified value, not the raw game_config value [Phase 6 — surfaced during Phase 2 device test 2026-06-08]
 - [ ] **VLG-08**: Even a fully maxed village (all 6 buildings at Lv 3) still loses food each tick; movement is always required
 - [ ] **VLG-09**: Raiders are a distinct future threat (not decay); "Defend" protects against raiders. Concept locked, built in a later phase — NOT Phase 2
 

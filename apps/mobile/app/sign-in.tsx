@@ -1,9 +1,26 @@
 import { View, Text, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { Redirect } from 'expo-router';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { useAuthStore } from '@/store/useAuthStore';
 import { supabase } from '@/lib/supabase';
+
+// Nonce helper for Apple & Google native Sign-In with Supabase.
+//
+// Both providers' native SDKs auto-inject a nonce into the id_token. Supabase
+// validates that nonce: if the token contains one, we MUST pass the raw nonce
+// to signInWithIdToken so Supabase can hash it and verify the match.
+// (Otherwise: "Passed nonce and nonce in id_token should either both exist or not.")
+//
+// Per Supabase docs:
+//   - Apple:  send HASHED nonce to Apple SDK, RAW nonce to Supabase
+//   - Google: send HASHED nonce to Google SDK, RAW nonce to Supabase
+async function generateNoncePair(): Promise<{ raw: string; hashed: string }> {
+  const raw = Crypto.randomUUID().replace(/-/g, '') + Crypto.randomUUID().replace(/-/g, '');
+  const hashed = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, raw);
+  return { raw, hashed };
+}
 
 export default function SignIn() {
   const session = useAuthStore((s) => s.session);
